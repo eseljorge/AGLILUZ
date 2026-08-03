@@ -50,39 +50,30 @@ def extraer_texto_desde_url(url):
     return ""
 
 def extraer_parametros_tecnicos_bases(texto):
-    # Potencia (ej: 100W, 150 W)
     potencias = re.findall(r'(\d+[\.,]?\d*)\s*(?:w|watt|watts)', texto, re.IGNORECASE)
     potencia_str = ", ".join(sorted(list(set(potencias)))) + " W" if potencias else "No especificado en bases"
 
-    # Flujo Luminoso (ej: 12000lm, 15.000 lm)
     flujos = re.findall(r'(\d+[\.,]?\d*)\s*(?:lm|lumenes|lúmenes)', texto, re.IGNORECASE)
     flujo_str = ", ".join(sorted(list(set(flujos)))) + " lm" if flujos else "No especificado en bases"
 
-    # CRI / Ra
     cri_match = re.findall(r'(?:cri|ra)\s*[:>]?\s*(\d+)', texto, re.IGNORECASE)
     cri_str = "CRI " + ", ".join(sorted(list(set(cri_match)))) if cri_match else "No especificado"
 
-    # IP (ej: IP66)
     ip_match = re.findall(r'ip\s*([0-6][5678])', texto, re.IGNORECASE)
     ip_str = "IP" + ", ".join(sorted(list(set(ip_match)))) if ip_match else "No especificado"
 
-    # IK (ej: IK08, IK10)
     ik_match = re.findall(r'ik\s*([0-1][0-9])', texto, re.IGNORECASE)
     ik_str = "IK" + ", ".join(sorted(list(set(ik_match)))) if ik_match else "No especificado"
 
-    # Temperatura de Color (Kelvin - ej: 3000K, 4000K)
     cct_match = re.findall(r'(\d{3,4})\s*k\b', texto, re.IGNORECASE)
     cct_str = ", ".join(sorted(list(set(cct_match)))) + "K" if cct_match else "No especificado"
 
-    # Garantía en años
     garantia_match = re.findall(r'(\d+)\s*(?:años|ano|anos)\s*de\s*garantía', texto, re.IGNORECASE)
     garantia_str = ", ".join(sorted(list(set(garantia_match)))) + " años" if garantia_match else "No especificado"
 
-    # Protección contra sobretensiones (Surge Protection en kV)
     surge_match = re.findall(r'(\d+)\s*kv\b', texto, re.IGNORECASE)
     surge_str = ", ".join(sorted(list(set(surge_match)))) + " kV" if surge_match else "No especificado"
 
-    # Certificaciones y Normas
     certificaciones = []
     if 'sec' in texto: certificaciones.append("Certificación SEC (Chile)")
     if 'ds1' in texto or 'decreto supremo' in texto or 'norma lumínica' in texto: certificaciones.append("Decreto Supremo N°1 (Norma Lumínica Chile)")
@@ -90,7 +81,6 @@ def extraer_parametros_tecnicos_bases(texto):
     if 'ce' in texto: certificaciones.append("Marcado CE / RoHs")
     cert_str = " | ".join(certificaciones) if certificaciones else "Normativa estándar de licitación"
 
-    # Otros elementos técnicos clave adicionales
     otros_elementos = []
     if 'fotometria' in texto or 'fotometría' in texto: otros_elementos.append("Exige Estudio Fotométrico")
     if 'telegestion' in texto or 'telegestión' in texto or 'zhaga' in texto or 'nema' in texto: otros_elementos.append("Telegestión / Zócalo NEMA o Zhaga")
@@ -128,7 +118,6 @@ def procesar_inteligencia_avanzada(row):
 
     texto_total = (texto_base + " " + texto_documentos_adjuntos).lower()
     
-    # Extracción extendida de parámetros técnicos de las bases
     potencia, flujo, cri, ip, ik, cct, garantia, surge, certs, otros_reqs = extraer_parametros_tecnicos_bases(texto_total)
 
     marcas_detectadas = "No especificado en actas"
@@ -186,7 +175,6 @@ def main():
     os.makedirs('agliluz', exist_ok=True)
     
     historial_path = 'agliluz/historial_licitaciones.xlsx'
-    dashboard_path = 'agliluz/dashboard_inteligencia_mercado.xlsx'
     
     df_historico = pd.DataFrame()
     if os.path.exists(historial_path):
@@ -196,6 +184,7 @@ def main():
         except Exception:
             pass
 
+    df_filtrado = pd.DataFrame()
     if response.status_code == 200:
         data = response.json()
         licitaciones = data.get('Listado', [])
@@ -222,8 +211,6 @@ def main():
                 
                 df_filtrado = df_nuevo[mask_keywords | mask_codigos | mask_ind].copy()
                 df_filtrado = df_filtrado.drop(columns=['texto_busqueda'])
-            else:
-                df_filtrado = pd.DataFrame()
             
             if not df_filtrado.empty:
                 blacklist = reglas_aprendidas.get("blacklist", [])
@@ -244,35 +231,28 @@ def main():
                     'Requerimiento_Garantia', 'Requerimiento_Proteccion_kV', 'Certificaciones_Exigidas', 'Otros_Requerimientos_Tecnicos'
                 ]
                 df_filtrado[cols_resultado] = df_filtrado.apply(procesar_inteligencia_avanzada, axis=1)
-                
-                if not df_historico.empty and 'CodigoExterno' in df_historico.columns and 'CodigoExterno' in df_filtrado.columns:
-                    df_combinado = pd.concat([df_historico, df_filtrado]).drop_duplicates(subset=['CodigoExterno'], keep='first')
-                else:
-                    df_combinado = df_filtrado if df_historico.empty else pd.concat([df_historico, df_filtrado])
-                
-                df_combinado.to_excel(historial_path, index=False)
-                
-                with pd.ExcelWriter(dashboard_path, engine='openpyxl') as writer:
-                    df_combinado.to_excel(writer, sheet_name='Dashboard_General', index=False)
-                    
-                    if 'Proveedor_Adjudicado' in df_combinado.columns:
-                        cols_mapa = [col for col in ['CodigoExterno', 'Nombre', 'Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Requerimiento_Potencia', 'Requerimiento_Flujo_Luminoso', 'Requerimiento_CCT_Kelvin', 'Certificaciones_Exigidas', 'Otros_Requerimientos_Tecnicos', 'Signify_Equivalente'] if col in df_combinado.columns]
-                        df_combinado[cols_mapa].to_excel(writer, sheet_name='Mapa_Competencia_Adjudicadas', index=False)
-                    
-                    portafolio_signify = pd.DataFrame({
-                        "Familia_Signify": ["RoadFlair", "Xceed Pro", "Tango Pro", "ActiStar", "Arena X", "GreenVision Solar"],
-                        "Aplicacion": ["Vial Alta Eficiencia", "Vial / Autopistas", "Arquitectónica / Proyectores", "Industrial / General", "Estadios y Canchas Deportivas", "Solar Fotovoltaica Autónoma"],
-                        "Estrategia_Chile": ["Liderazgo en vías urbanas e interurbanas", "Alto flujo lumínico y robustez vial", "Control estricto DS1 y diseño de fachadas", "Versatilidad e industrial general", "Máximo rendimiento para recintos deportivos", "Sostenibilidad sin red eléctrica"]
-                    })
-                    portafolio_signify.to_excel(writer, sheet_name='Portafolio_Signify_Chile', index=False)
 
-                print("¡Dashboard Ejecutivo actualizado con todos los parámetros y requerimientos técnicos extendidos!")
-            else:
-                print("No se encontraron registros nuevos tras aplicar los filtros avanzados.")
+    # Fusionar con historial previo y ASEGURAR que el archivo siempre se guarde
+    if not df_filtrado.empty:
+        if not df_historico.empty and 'CodigoExterno' in df_historico.columns and 'CodigoExterno' in df_filtrado.columns:
+            df_combinado = pd.concat([df_historico, df_filtrado]).drop_duplicates(subset=['CodigoExterno'], keep='first')
         else:
-            print("No hay licitaciones en la respuesta general de la API.")
+            df_combinado = df_filtrado
     else:
-        print(f"Error al conectar con la API: {response.status_code}")
+        df_combinado = df_historico
+
+    # Si aún está vacío (primera ejecución sin registros), crear estructura base para que Streamlit no falle
+    if df_combinado.empty:
+        df_combinado = pd.DataFrame(columns=[
+            'CodigoExterno', 'Nombre', 'Nivel_Compatibilidad', 'Signify_Equivalente', 
+            'Requerimiento_Potencia', 'Requerimiento_Flujo_Luminoso', 'Certificaciones_Exigidas',
+            'Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Cantidad_Unidades', 'Categoria_Proyecto'
+        ])
+
+    # Guardar siempre el archivo maestro y el reporte
+    df_combinado.to_excel(historial_path, index=False)
+    df_combinado.to_excel('agliluz/reporte_licitaciones.xlsx', index=False)
+    print(f"¡Proceso finalizado! Archivo guardado con {len(df_combinado)} registros totales.")
 
 if __name__ == '__main__':
     main()
