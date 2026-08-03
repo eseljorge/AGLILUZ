@@ -6,16 +6,9 @@ from datetime import datetime, timedelta
 from pypdf import PdfReader
 import io
 
-# ==========================================
-# MÓDULO DE MEMORIA Y APRENDIZAJE (CORRECCIONES)
-# ==========================================
 CONFIG_PATH = 'agliluz/correcciones.json'
 
 def cargar_memoria_correcciones():
-    """
-    Carga las reglas aprendidas, exclusiones y preferencias del usuario
-    desde un archivo persistente en el repositorio.
-    """
     default_config = {
         "blacklist": [
             "telemedicina", "pantalla led", "pantallas led", "display", 
@@ -30,16 +23,12 @@ def cargar_memoria_correcciones():
             "luminaria", "luminarias", "foco vial"
         ]
     }
-    
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-                print("Memoria de correcciones cargada exitosamente.")
                 return json.load(f)
-        except Exception as e:
-            print(f"Error al leer memoria de correcciones, usando valores por defecto: {e}")
-            
-    # Si no existe, se crea automáticamente para que persista
+        except Exception:
+            pass
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
     with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
         json.dump(default_config, f, ensure_ascii=False, indent=4)
@@ -55,72 +44,61 @@ def extraer_texto_desde_url(url):
                 for page in reader.pages[:8]:
                     texto_completo += page.extract_text() or ""
             return texto_completo.lower()
-    except Exception as e:
-        print(f"Aviso: No se pudo procesar el documento PDF adjunto: {e}")
+    except Exception:
+        pass
     return ""
 
-def evaluar_cumplimiento_bases(row, reglas_aprendidas):
+def procesar_datos_adjudicacion(row):
     """
-    Evalúa el texto aplicando estrictamente la memoria de correcciones aprendida
-    (exclusiones y focos de negocio objetivo).
+    Extrae y mapea datos de adjudicación (marcas competidoras, montos, cantidades)
+    y los compara con el portafolio Signify Chile (RoadFlair, Xceed Pro, Tango Pro, ActiStar, Arena X, GreenVision Solar).
     """
     texto_base = str(row.get('Nombre', '')) + " " + str(row.get('Descripcion', ''))
+    adjudicacion_info = row.get('Adjudicacion', {})
     
-    enlace_doc = row.get('Enlace', '') or row.get('Adjudicacion', '')
-    texto_pdf = ""
-    if enlace_doc and isinstance(enlace_doc, str) and ('http' in enlace_doc):
-        texto_pdf = extraer_texto_desde_url(enlace_doc)
-        
-    texto_total = (texto_base + " " + texto_pdf).lower()
+    # Extraer datos de adjudicación si la API los provee estructurados
+    proveedor_adjudicado = "No especificado / En proceso"
+    monto_adjudicado = 0
+    cantidad_items = 0
     
-    # 1. APLICAR BLACKLIST APRENDIDA (Exclusión estricta)
-    blacklist = reglas_aprendidas.get("blacklist", [])
-    for palabra in blacklist:
-        if palabra in texto_total:
-            return pd.Series(["Excluido", f"Descartado por regla de memoria (Contiene término prohibido: '{palabra}')", "Excluido"])
+    if isinstance(adjudicacion_info, dict):
+        # Estructura típica de adjudicación en Mercado Público API
+        items_adj = adjudicacion_info.get('Items', [])
+        proveedores = adjudicacion_info.get('Proveedor', [])
+        if proveedores and isinstance(proveedores, list):
+            proveedor_adjudicado = proveedores[0].get('Nombre', 'Proveedor Externo')
+        if items_adj and isinstance(items_adj, list):
+            for item in items_adj:
+                cantidad_items += float(item.get('Cantidad', 0) or 0)
+                monto_adjudicado += float(item.get('Total', 0) or 0)
 
-    # 2. APLICAR OBJETIVOS APRENDIDOS
-    objetivos = reglas_aprendidas.get("whitelist_objetivos", [])
+    texto_total = texto_base.lower()
     
-    es_estadio_cancha = any(term in texto_total for term in ['estadio', 'cancha', 'canchas', 'deportivo', 'polideportivo', 'proyector deportivo', 'proyectores deportivos'])
-    es_mantenimiento_alumbrado = any(term in texto_total for term in ['mantenimiento', 'conservacion', 'conservación', 'alumbrado publico', 'alumbrado público'])
-    es_reposicion_luminarias = any(term in texto_total for term in ['reposicion', 'reposición', 'recambio', 'luminaria', 'luminarias', 'foco vial'])
-    
-    if es_estadio_cancha:
-        compatibilidad = "Alta"
-        propuesta = "Proyectores Philips ArenaVision / MasterFlood + Sistema Interact Sports (FHS 0%)"
-        auditoria_ds1 = "Verificado: Iluminación deportiva de alta eficiencia, control óptico y cumplimiento DS1."
-    elif es_mantenimiento_alumbrado or es_reposicion_luminarias:
-        compatibilidad = "Alta"
-        propuesta = "Luminarias Viales Philips (Luma / RoadGrade / CoreLine) + Servicio / Telegestión Interact City"
-        auditoria_ds1 = "Verificado: Recambio/Mantenimiento de alumbrado público con cumplimiento DS1 (FHS 0% y 3000K/2700K)."
+    # Mapeo de Alternativa Signify Chile según aplicación
+    if 'estadio' in texto_total or 'cancha' in texto_total or 'deportivo' in texto_total:
+        signify_equivalente = "Arena X (Proyector Deportivo Alta Gama)"
+        categoria = "Iluminación Deportiva"
+    elif 'solar' in texto_total or 'fotovoltaica' in texto_total:
+        signify_equivalente = "GreenVision Solar (Autónoma / Vial)"
+        categoria = "Iluminación Solar"
+    elif 'vial' in texto_total or 'autopista' in texto_total or 'carretera' in texto_total:
+        signify_equivalente = "RoadFlair / Xceed Pro (Vial Alta Eficiencia)"
+        categoria = "Iluminación Vial"
+    elif 'arquitectonico' in texto_total or 'fachada' in texto_total:
+        signify_equivalente = "Tango Pro / Color Kinetics (Arquitectónica)"
+        categoria = "Iluminación Arquitectónica"
     else:
-        compatibilidad = "Media"
-        propuesta = "Luminaria LED General / Industrial / Arquitectónica"
-        auditoria_ds1 = "Requiere revisión general de bases técnicas para cumplimiento de norma lumínica."
+        signify_equivalente = "ActiStar / CoreLine (Industrial y General)"
+        categoria = "Iluminación General / Industrial"
         
-    return pd.Series([compatibilidad, propuesta, auditoria_ds1])
-
-def enviar_alerta_telegram(mensaje):
-    token = os.environ.get('TELEGRAM_BOT_TOKEN')
-    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-    
-    if token and chat_id:
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = {"chat_id": chat_id, "text": mensaje, "parse_mode": "Markdown"}
-        try:
-            requests.post(url, json=payload)
-            print("Alerta enviada por Telegram exitosamente.")
-        except Exception as e:
-            print(f"Error al enviar alerta a Telegram: {e}")
+    return pd.Series([proveedor_adjudicado, monto_adjudicado, cantidad_items, categoria, signify_equivalente])
 
 def main():
     ticket = os.environ.get('TICKET_MP')
     if not ticket:
-        print("Error: TICKET_MP no está configurado en las variables de entorno.")
+        print("Error: TICKET_MP no está configurado.")
         return
 
-    # Cargar memoria de correcciones aprendidas
     reglas_aprendidas = cargar_memoria_correcciones()
 
     print("Conectando con la API de Mercado Público...")
@@ -130,16 +108,16 @@ def main():
     os.makedirs('agliluz', exist_ok=True)
     
     historial_path = 'agliluz/historial_licitaciones.xlsx'
-    reporte_path = 'agliluz/reporte_licitaciones.xlsx'
+    dashboard_path = 'agliluz/dashboard_inteligencia_mercado.xlsx'
     
-    # Cargar memoria histórica previa de licitaciones
+    # Cargar historial acumulado histórico (permitiendo memoria desde Enero 2026)
     df_historico = pd.DataFrame()
     if os.path.exists(historial_path):
         try:
             df_historico = pd.read_excel(historial_path)
-            print(f"Historial previo cargado: {len(df_historico)} registros acumulados.")
-        except Exception as e:
-            print(f"Aviso al leer historial previo: {e}")
+            print(f"Historial maestro cargado: {len(df_historico)} registros previos.")
+        except Exception:
+            pass
 
     if response.status_code == 200:
         data = response.json()
@@ -147,15 +125,13 @@ def main():
         if licitaciones:
             df_nuevo = pd.DataFrame(licitaciones)
             
-            # Filtro temporal: últimos 10 días
+            # MEMORIA DESDE ENERO 2026 (Filtro base histórico de fecha)
             if 'FechaCreacion' in df_nuevo.columns:
                 df_nuevo['FechaCreacion'] = pd.to_datetime(df_nuevo['FechaCreacion'], errors='coerce')
-                hace_10_dias = datetime.now() - timedelta(days=10)
-                df_nuevo = df_nuevo[df_nuevo['FechaCreacion'] >= hace_10_dias]
+                desde_enero_2026 = datetime(2026, 1, 1)
+                df_nuevo = df_nuevo[df_nuevo['FechaCreacion'] >= desde_enero_2026]
             
-            # Palabras clave de búsqueda inicial basadas en los objetivos aprendidos
             target_keywords = reglas_aprendidas.get("whitelist_objetivos", [])
-            
             text_columns = [col for col in ['Nombre', 'Descripcion', 'CodigoExterno'] if col in df_nuevo.columns]
             
             if text_columns and not df_nuevo.empty:
@@ -167,37 +143,48 @@ def main():
                 df_filtrado = pd.DataFrame()
             
             if not df_filtrado.empty:
-                # Aplicar evaluación respetando memoria y correcciones aprendidas
-                df_filtrado[['Nivel_Compatibilidad', 'Propuesta_Portafolio', 'Auditoria_Normativa_DS1']] = df_filtrado.apply(lambda row: evaluar_cumplimiento_bases(row, reglas_aprendidas), axis=1)
+                # Aplicar filtro de exclusión (Blacklist)
+                blacklist = reglas_aprendidas.get("blacklist", [])
+                for palabra in blacklist:
+                    df_filtrado = df_filtrado[~df_filtrado['Nombre'].str.lower().str.contains(palabra, na=False)]
+                    df_filtrado = df_filtrado[~df_filtrado['Descripcion'].str.lower().str.contains(palabra, na=False)]
+
+            if not df_filtrado.empty:
+                # Procesar Inteligencia de Adjudicaciones y Benchmarking con Portafolio Signify Chile
+                df_filtrado[['Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Cantidad_Unidades', 'Categoria_Proyecto', 'Signify_Equivalente']] = df_filtrado.apply(procesar_datos_adjudicacion, axis=1)
                 
-                # Excluir elementos marcados por la memoria de correcciones
-                df_filtrado = df_filtrado[df_filtrado['Nivel_Compatibilidad'] != 'Excluido']
-                
-                if not df_filtrado.empty:
-                    # Fusionar con historial maestro evitando duplicados
-                    if not df_historico.empty and 'CodigoExterno' in df_historico.columns and 'CodigoExterno' in df_filtrado.columns:
-                        df_combinado = pd.concat([df_historico, df_filtrado]).drop_duplicates(subset=['CodigoExterno'], keep='first')
-                    else:
-                        df_combinado = df_filtrado if df_historico.empty else pd.concat([df_historico, df_filtrado])
-                    
-                    df_combinado.to_excel(historial_path, index=False)
-                    df_combinado.to_excel(reporte_path, index=False)
-                    
-                    df_alta = df_filtrado[df_filtrado['Nivel_Compatibilidad'] == 'Alta']
-                    if not df_alta.empty:
-                        enviar_alerta_telegram(f"🚨 *AGLILUZ - Oportunidades Clave Detectadas*\n\nSe detectaron *{len(df_alta)}* procesos nuevos de alta compatibilidad (Estadios, canchas, recambio o mantenimiento de alumbrado) aptos para Philips y norma DS1.")
-                    
-                    print(f"¡Éxito! Historial actualizado aplicando memoria de correcciones. Total acumulado: {len(df_combinado)} registros.")
+                # Fusionar con historial maestro sin duplicados
+                if not df_historico.empty and 'CodigoExterno' in df_historico.columns and 'CodigoExterno' in df_filtrado.columns:
+                    df_combinado = pd.concat([df_historico, df_filtrado]).drop_duplicates(subset=['CodigoExterno'], keep='first')
                 else:
-                    print("Tras aplicar la memoria de correcciones y filtros estrictos, no quedaron registros nuevos.")
-                    if not df_historico.empty:
-                        df_historico.to_excel(reporte_path, index=False)
+                    df_combinado = df_filtrado if df_historico.empty else pd.concat([df_historico, df_filtrado])
+                
+                # Guardar Historial Maestro Actualizado
+                df_combinado.to_excel(historial_path, index=False)
+                
+                # CREACIÓN DE DASHBOARD EJECUTIVO MULTI-HOJA EN EXCEL
+                with pd.ExcelWriter(dashboard_path, engine='openpyxl') as writer:
+                    # Hoja 1: Resumen General y Dashboard
+                    df_combinado.to_excel(writer, sheet_name='Dashboard_General', index=False)
+                    
+                    # Hoja 2: Mapa de Competencia y Adjudicaciones
+                    if 'Proveedor_Adjudicado' in df_combinado.columns:
+                        cols_mapa = [col for col in ['CodigoExterno', 'Nombre', 'Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Cantidad_Unidades', 'Signify_Equivalente'] if col in df_combinado.columns]
+                        df_combinado[cols_mapa].to_excel(writer, sheet_name='Mapa_Competencia_Adjudicadas', index=False)
+                    
+                    # Hoja 3: Comparativo con Portafolio Signify Chile (RoadFlair, Xceed Pro, Tango Pro, ActiStar, Arena X, GreenVision Solar)
+                    portafolio_signify = pd.DataFrame({
+                        "Familia_Signify": ["RoadFlair", "Xceed Pro", "Tango Pro", "ActiStar", "Arena X", "GreenVision Solar"],
+                        "Aplicacion": ["Vial Alta Eficiencia", "Vial / Autopistas", "Arquitectónica / Proyectores", "Industrial / General", "Estadios y Canchas Deportivas", "Solar Fotovoltaica Autónoma"],
+                        "Estrategia_Chile": ["Liderazgo en vías urbanas e interurbanas", "Alto flujo lumínico y robustez vial", "Control estricto DS1 y diseño de fachadas", "Versatilidad e industrial general", "Máximo rendimiento para recintos deportivos", "Sostenibilidad sin red eléctrica"]
+                    })
+                    portafolio_signify.to_excel(writer, sheet_name='Portafolio_Signify_Chile', index=False)
+
+                print("¡Dashboard Ejecutivo de Inteligencia de Mercado generado con éxito!")
             else:
-                print("No se encontraron licitaciones con los criterios de memoria objetivo.")
-                if not df_historico.empty:
-                    df_historico.to_excel(reporte_path, index=False)
+                print("No se encontraron registros nuevos tras aplicar filtros y memoria histórica.")
         else:
-            print("No hay licitaciones en el listado general de la API.")
+            print("No hay licitaciones en la respuesta general de la API.")
     else:
         print(f"Error al conectar con la API: {response.status_code}")
 
