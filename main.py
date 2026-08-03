@@ -49,20 +49,14 @@ def extraer_texto_desde_url(url):
     return ""
 
 def procesar_datos_adjudicacion(row):
-    """
-    Extrae y mapea datos de adjudicación (marcas competidoras, montos, cantidades)
-    y los compara con el portafolio Signify Chile (RoadFlair, Xceed Pro, Tango Pro, ActiStar, Arena X, GreenVision Solar).
-    """
     texto_base = str(row.get('Nombre', '')) + " " + str(row.get('Descripcion', ''))
     adjudicacion_info = row.get('Adjudicacion', {})
     
-    # Extraer datos de adjudicación si la API los provee estructurados
     proveedor_adjudicado = "No especificado / En proceso"
     monto_adjudicado = 0
     cantidad_items = 0
     
     if isinstance(adjudicacion_info, dict):
-        # Estructura típica de adjudicación en Mercado Público API
         items_adj = adjudicacion_info.get('Items', [])
         proveedores = adjudicacion_info.get('Proveedor', [])
         if proveedores and isinstance(proveedores, list):
@@ -74,7 +68,6 @@ def procesar_datos_adjudicacion(row):
 
     texto_total = texto_base.lower()
     
-    # Mapeo de Alternativa Signify Chile según aplicación
     if 'estadio' in texto_total or 'cancha' in texto_total or 'deportivo' in texto_total:
         signify_equivalente = "Arena X (Proyector Deportivo Alta Gama)"
         categoria = "Iluminación Deportiva"
@@ -110,7 +103,6 @@ def main():
     historial_path = 'agliluz/historial_licitaciones.xlsx'
     dashboard_path = 'agliluz/dashboard_inteligencia_mercado.xlsx'
     
-    # Cargar historial acumulado histórico (permitiendo memoria desde Enero 2026)
     df_historico = pd.DataFrame()
     if os.path.exists(historial_path):
         try:
@@ -125,7 +117,6 @@ def main():
         if licitaciones:
             df_nuevo = pd.DataFrame(licitaciones)
             
-            # MEMORIA DESDE ENERO 2026 (Filtro base histórico de fecha)
             if 'FechaCreacion' in df_nuevo.columns:
                 df_nuevo['FechaCreacion'] = pd.to_datetime(df_nuevo['FechaCreacion'], errors='coerce')
                 desde_enero_2026 = datetime(2026, 1, 1)
@@ -142,37 +133,34 @@ def main():
             else:
                 df_filtrado = pd.DataFrame()
             
+            # FILTRO DE EXCLUSIÓN (BLACKLIST) SEGURO ANTE COLUMNAS FALTANTES
             if not df_filtrado.empty:
-                # Aplicar filtro de exclusión (Blacklist)
                 blacklist = reglas_aprendidas.get("blacklist", [])
-                for palabra in blacklist:
-                    df_filtrado = df_filtrado[~df_filtrado['Nombre'].str.lower().str.contains(palabra, na=False)]
-                    df_filtrado = df_filtrado[~df_filtrado['Descripcion'].str.lower().str.contains(palabra, na=False)]
+                cols_disponibles = [c for c in ['Nombre', 'Descripcion'] if c in df_filtrado.columns]
+                if cols_disponibles:
+                    for palabra in blacklist:
+                        mask = False
+                        for col in cols_disponibles:
+                            mask = mask | df_filtrado[col].astype(str).str.lower().str.contains(palabra, na=False)
+                        df_filtrado = df_filtrado[~mask]
 
             if not df_filtrado.empty:
-                # Procesar Inteligencia de Adjudicaciones y Benchmarking con Portafolio Signify Chile
                 df_filtrado[['Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Cantidad_Unidades', 'Categoria_Proyecto', 'Signify_Equivalente']] = df_filtrado.apply(procesar_datos_adjudicacion, axis=1)
                 
-                # Fusionar con historial maestro sin duplicados
                 if not df_historico.empty and 'CodigoExterno' in df_historico.columns and 'CodigoExterno' in df_filtrado.columns:
                     df_combinado = pd.concat([df_historico, df_filtrado]).drop_duplicates(subset=['CodigoExterno'], keep='first')
                 else:
                     df_combinado = df_filtrado if df_historico.empty else pd.concat([df_historico, df_filtrado])
                 
-                # Guardar Historial Maestro Actualizado
                 df_combinado.to_excel(historial_path, index=False)
                 
-                # CREACIÓN DE DASHBOARD EJECUTIVO MULTI-HOJA EN EXCEL
                 with pd.ExcelWriter(dashboard_path, engine='openpyxl') as writer:
-                    # Hoja 1: Resumen General y Dashboard
                     df_combinado.to_excel(writer, sheet_name='Dashboard_General', index=False)
                     
-                    # Hoja 2: Mapa de Competencia y Adjudicaciones
                     if 'Proveedor_Adjudicado' in df_combinado.columns:
                         cols_mapa = [col for col in ['CodigoExterno', 'Nombre', 'Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Cantidad_Unidades', 'Signify_Equivalente'] if col in df_combinado.columns]
                         df_combinado[cols_mapa].to_excel(writer, sheet_name='Mapa_Competencia_Adjudicadas', index=False)
                     
-                    # Hoja 3: Comparativo con Portafolio Signify Chile (RoadFlair, Xceed Pro, Tango Pro, ActiStar, Arena X, GreenVision Solar)
                     portafolio_signify = pd.DataFrame({
                         "Familia_Signify": ["RoadFlair", "Xceed Pro", "Tango Pro", "ActiStar", "Arena X", "GreenVision Solar"],
                         "Aplicacion": ["Vial Alta Eficiencia", "Vial / Autopistas", "Arquitectónica / Proyectores", "Industrial / General", "Estadios y Canchas Deportivas", "Solar Fotovoltaica Autónoma"],
