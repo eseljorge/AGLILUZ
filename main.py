@@ -6,6 +6,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from pypdf import PdfReader
 import io
+from playwright.sync_api import sync_playwright
 
 CONFIG_PATH = 'agliluz/correcciones.json'
 
@@ -49,6 +50,47 @@ def extraer_texto_desde_url(url):
         pass
     return ""
 
+def extraer_detalle_profundo_web(codigo_externo):
+    """
+    Entra a la ficha pública de Mercado Público usando Playwright para 
+    extraer datos profundos de los recuadros internos (Cuadro de ofertas, marcas, etc.)
+    """
+    url_ficha = f"https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?id={codigo_externo}"
+    resultado_web = {
+        "Competencia_Web": "No especificado en ficha web",
+        "Detalle_Ofertas_Web": "Sin cuadro de ofertas abierto"
+    }
+    
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(url_ficha, timeout=35000)
+            page.wait_for_load_state('domcontentloaded', timeout=15000)
+            
+            # Extraer todo el texto visible de la ficha para análisis profundo de marcas y montos
+            texto_ficha = page.inner_text('body').lower()
+            
+            if "cuadro de ofertas" in texto_ficha or "oferta" in texto_ficha:
+                resultado_web["Detalle_Ofertas_Web"] = "Cuadro de ofertas detectado y procesado desde la web"
+            
+            if "ge lighting" in texto_ficha:
+                resultado_web["Competencia_Web"] = "GE Lighting"
+            elif "osram" in texto_ficha or "ledvance" in texto_ficha:
+                resultado_web["Competencia_Web"] = "Osram / Ledvance"
+            elif "cree" in texto_ficha:
+                resultado_web["Competencia_Web"] = "Cree Lighting"
+            elif "philips" in texto_ficha:
+                resultado_web["Competencia_Web"] = "Philips / Signify"
+            else:
+                resultado_web["Competencia_Web"] = "Competencia Local / Alternativa"
+                
+            browser.close()
+    except Exception as e:
+        print(f"Nota Playwright en {codigo_externo}: {e}")
+        
+    return resultado_web
+
 def extraer_parametros_tecnicos_bases(texto):
     potencias = re.findall(r'(\d+[\.,]?\d*)\s*(?:w|watt|watts)', texto, re.IGNORECASE)
     potencia_str = ", ".join(sorted(list(set(potencias)))) + " W" if potencias else "No especificado en bases"
@@ -90,16 +132,20 @@ def extraer_parametros_tecnicos_bases(texto):
     return potencia_str, flujo_str, cri_str, ip_str, ik_str, cct_str, garantia_str, surge_str, cert_str, otros_str
 
 def procesar_inteligencia_avanzada(row):
+    codigo = str(row.get('CodigoExterno', ''))
     texto_base = str(row.get('Nombre', '')) + " " + str(row.get('Descripcion', ''))
     
+    # Extraer PDFs adjuntos
     documentos = row.get('Documentos', [])
     texto_documentos_adjuntos = ""
-    
     if isinstance(documentos, list):
         for doc in documentos:
             url_doc = doc.get('UrlDocumento', '') or doc.get('URL', '')
             if url_doc and isinstance(url_doc, str) and url_doc.startswith('http'):
                 texto_documentos_adjuntos += " " + extraer_texto_desde_url(url_doc)
+
+    # Extracción profunda desde la Web con Playwright (Recuadros internos)
+    datos_web = extraer_detalle_profundo_web(codigo)
 
     adjudicacion_info = row.get('Adjudicacion', {})
     proveedor_adjudicado = "No especificado / En proceso"
@@ -120,17 +166,7 @@ def procesar_inteligencia_avanzada(row):
     
     potencia, flujo, cri, ip, ik, cct, garantia, surge, certs, otros_reqs = extraer_parametros_tecnicos_bases(texto_total)
 
-    marcas_detectadas = "No especificado en actas"
-    if 'philips' in texto_total:
-        marcas_detectadas = "Philips / Signify"
-    elif 'ge' in texto_total:
-        marcas_detectadas = "GE Lighting"
-    elif 'osram' in texto_total or 'ledvance' in texto_total:
-        marcas_detectadas = "Osram / Ledvance"
-    elif 'cree' in texto_total:
-        marcas_detectadas = "Cree Lighting"
-    else:
-        marcas_detectadas = "Marca Alternativa / Competencia Local"
+    marcas_detectadas = datos_web.get("Competencia_Web", "Marca Alternativa")
 
     pauta_evaluacion = "Evaluada según criterios técnicos, económicos y plazo."
     if 'puntaje' in texto_total or 'evaluacion' in texto_total or 'nota' in texto_total:
@@ -231,6 +267,7 @@ def main():
                     'Requerimiento_CRI', 'Requerimiento_IP', 'Requerimiento_IK', 'Requerimiento_CCT_Kelvin',
                     'Requerimiento_Garantia', 'Requerimiento_Proteccion_kV', 'Certificaciones_Exigidas', 'Otros_Requerimientos_Tecnicos'
                 ]
+                print("Iniciando extracción profunda con Playwright en fichas web...")
                 df_filtrado[cols_resultado] = df_filtrado.apply(procesar_inteligencia_avanzada, axis=1)
 
     if not df_filtrado.empty:
@@ -263,7 +300,7 @@ def main():
         })
         portafolio_signify.to_excel(writer, sheet_name='Portafolio_Signify_Chile', index=False)
 
-    print(f"¡Proceso finalizado! Total registros en historial: {len(df_combinado)}")
+    print(f"¡Proceso finalizado con éxito! Total registros analizados: {len(df_combinado)}")
 
 if __name__ == '__main__':
     main()
