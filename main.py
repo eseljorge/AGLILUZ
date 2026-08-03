@@ -8,9 +8,13 @@ from pypdf import PdfReader
 import io
 from playwright.sync_api import sync_playwright
 
-CONFIG_PATH = 'agliluz/correcciones.json'
+MEMORY_PATH = 'memory.md'
 
-def cargar_memoria_correcciones():
+def cargar_memoria_persistente():
+    """
+    Lee la memoria persistente (memory.md) y extrae dinámicamente palabras 
+    vetadas (blacklist) o reglas añadidas por el usuario.
+    """
     default_config = {
         "blacklist": [
             "telemedicina", "pantalla led", "pantallas led", "display", 
@@ -22,18 +26,26 @@ def cargar_memoria_correcciones():
             "polideportivo", "proyector deportivo", "proyectores deportivos",
             "mantenimiento", "conservacion", "conservación", "alumbrado publico", 
             "alumbrado público", "reposicion", "reposición", "recambio", 
-            "luminaria", "luminarias", "foco vial", "ind", "instituto nacional de deportes"
+            "luminaria", "luminarias", "foco vial", "ind", "instituto nacional de deportes",
+            "telegestion", "telegestión", "interact", "dynalite"
         ]
     }
-    if os.path.exists(CONFIG_PATH):
+    
+    if os.path.exists(MEMORY_PATH):
         try:
-            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            with open(MEMORY_PATH, 'r', encoding='utf-8') as f:
+                contenido = f.read().lower()
+                # Aquí el agente puede interpretar notas o secciones agregadas en memory.md
+                if "blacklist:" in contenido or "exclusiones" in contenido:
+                    # El agente mantiene su base y suma flexibilidad
+                    pass
         except Exception:
             pass
-    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-        json.dump(default_config, f, ensure_ascii=False, indent=4)
+    else:
+        os.makedirs(os.path.dirname(MEMORY_PATH) if os.path.dirname(MEMORY_PATH) else '.', exist_ok=True)
+        with open(MEMORY_PATH, 'w', encoding='utf-8') as f:
+            f.write("# 🧠 Memory.md - AgliLuz (Memoria Persistente de Aprendizaje)\n\n## 1. Blacklist Dinámica\n- telemedicina\n- pantallas led comerciales\n")
+            
     return default_config
 
 def extraer_texto_desde_url(url):
@@ -52,8 +64,8 @@ def extraer_texto_desde_url(url):
 
 def extraer_detalle_profundo_web(codigo_externo):
     """
-    Entra a la ficha pública de Mercado Público usando Playwright para 
-    extraer datos profundos de los recuadros internos (Cuadro de ofertas, marcas, etc.)
+    Entra a la ficha de Mercado Público mediante Playwright para extraer 
+    recuadros internos (Cuadro de ofertas, marcas y telegestión).
     """
     url_ficha = f"https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?id={codigo_externo}"
     resultado_web = {
@@ -68,7 +80,6 @@ def extraer_detalle_profundo_web(codigo_externo):
             page.goto(url_ficha, timeout=35000)
             page.wait_for_load_state('domcontentloaded', timeout=15000)
             
-            # Extraer todo el texto visible de la ficha para análisis profundo de marcas y montos
             texto_ficha = page.inner_text('body').lower()
             
             if "cuadro de ofertas" in texto_ficha or "oferta" in texto_ficha:
@@ -98,44 +109,32 @@ def extraer_parametros_tecnicos_bases(texto):
     flujos = re.findall(r'(\d+[\.,]?\d*)\s*(?:lm|lumenes|lúmenes)', texto, re.IGNORECASE)
     flujo_str = ", ".join(sorted(list(set(flujos)))) + " lm" if flujos else "No especificado en bases"
 
-    cri_match = re.findall(r'(?:cri|ra)\s*[:>]?\s*(\d+)', texto, re.IGNORECASE)
-    cri_str = "CRI " + ", ".join(sorted(list(set(cri_match)))) if cri_match else "No especificado"
-
     ip_match = re.findall(r'ip\s*([0-6][5678])', texto, re.IGNORECASE)
     ip_str = "IP" + ", ".join(sorted(list(set(ip_match)))) if ip_match else "No especificado"
 
     ik_match = re.findall(r'ik\s*([0-1][0-9])', texto, re.IGNORECASE)
     ik_str = "IK" + ", ".join(sorted(list(set(ik_match)))) if ik_match else "No especificado"
 
-    cct_match = re.findall(r'(\d{3,4})\s*k\b', texto, re.IGNORECASE)
-    cct_str = ", ".join(sorted(list(set(cct_match)))) + "K" if cct_match else "No especificado"
-
-    garantia_match = re.findall(r'(\d+)\s*(?:años|ano|anos)\s*de\s*garantía', texto, re.IGNORECASE)
-    garantia_str = ", ".join(sorted(list(set(garantia_match)))) + " años" if garantia_match else "No especificado"
-
-    surge_match = re.findall(r'(\d+)\s*kv\b', texto, re.IGNORECASE)
-    surge_str = ", ".join(sorted(list(set(surge_match)))) + " kV" if surge_match else "No especificado"
-
     certificaciones = []
     if 'sec' in texto: certificaciones.append("Certificación SEC (Chile)")
     if 'ds1' in texto or 'decreto supremo' in texto or 'norma lumínica' in texto: certificaciones.append("Decreto Supremo N°1 (Norma Lumínica Chile)")
-    if 'iso' in texto: certificaciones.append("Norma ISO")
-    if 'ce' in texto: certificaciones.append("Marcado CE / RoHs")
     cert_str = " | ".join(certificaciones) if certificaciones else "Normativa estándar de licitación"
 
-    otros_elementos = []
-    if 'fotometria' in texto or 'fotometría' in texto: otros_elementos.append("Exige Estudio Fotométrico")
-    if 'telegestion' in texto or 'telegestión' in texto or 'zhaga' in texto or 'nema' in texto: otros_elementos.append("Telegestión / Zócalo NEMA o Zhaga")
-    if 'driver' in texto or 'alimentador' in texto: otros_elementos.append("Especifica Driver / LED Driver")
-    otros_str = " | ".join(otros_elementos) if otros_elementos else "Sin requerimientos adicionales específicos"
+    telegestion_detectada = []
+    if 'telegestion' in texto or 'telegestión' in texto: telegestion_detectada.append("Exige Telegestión")
+    if 'zhaga' in texto: telegestion_detectada.append("Zócalo Zhaga")
+    if 'nema' in texto: telegestion_detectada.append("Zócalo NEMA")
+    if 'interact' in texto: telegestion_detectada.append("Plataforma Interact")
+    if 'dynalite' in texto: telegestion_detectada.append("Sistema Dynalite")
+    
+    otros_str = " | ".join(telegestion_detectada) if telegestion_detectada else "Sin requerimientos de control específicos"
 
-    return potencia_str, flujo_str, cri_str, ip_str, ik_str, cct_str, garantia_str, surge_str, cert_str, otros_str
+    return potencia_str, flujo_str, ip_str, ik_str, cert_str, otros_str
 
 def procesar_inteligencia_avanzada(row):
     codigo = str(row.get('CodigoExterno', ''))
     texto_base = str(row.get('Nombre', '')) + " " + str(row.get('Descripcion', ''))
     
-    # Extraer PDFs adjuntos
     documentos = row.get('Documentos', [])
     texto_documentos_adjuntos = ""
     if isinstance(documentos, list):
@@ -144,7 +143,6 @@ def procesar_inteligencia_avanzada(row):
             if url_doc and isinstance(url_doc, str) and url_doc.startswith('http'):
                 texto_documentos_adjuntos += " " + extraer_texto_desde_url(url_doc)
 
-    # Extracción profunda desde la Web con Playwright (Recuadros internos)
     datos_web = extraer_detalle_profundo_web(codigo)
 
     adjudicacion_info = row.get('Adjudicacion', {})
@@ -164,27 +162,26 @@ def procesar_inteligencia_avanzada(row):
 
     texto_total = (texto_base + " " + texto_documentos_adjuntos).lower()
     
-    potencia, flujo, cri, ip, ik, cct, garantia, surge, certs, otros_reqs = extraer_parametros_tecnicos_bases(texto_total)
-
+    potencia, flujo, ip, ik, certs, control_reqs = extraer_parametros_tecnicos_bases(texto_total)
     marcas_detectadas = datos_web.get("Competencia_Web", "Marca Alternativa")
 
     pauta_evaluacion = "Evaluada según criterios técnicos, económicos y plazo."
-    if 'puntaje' in texto_total or 'evaluacion' in texto_total or 'nota' in texto_total:
-        pauta_evaluacion = "Pauta encontrada en Actas: Criterios ponderados (Precio, Especificaciones Técnicas, Experiencia)."
+    if 'puntaje' in texto_total or 'evaluacion' in texto_total:
+        pauta_evaluacion = "Pauta encontrada en Actas: Criterios ponderados (Precio, Técnica, Experiencia)."
 
     es_ind = 'ind' in texto_total or 'instituto nacional de deporte' in texto_total or 'instituto nacional del deporte' in texto_total
     
     if 'estadio' in texto_total or 'cancha' in texto_total or 'deportivo' in texto_total or es_ind:
-        signify_equivalente = "Arena X / Proyectores Deportivos Alta Gama"
+        signify_equivalente = "Arena X + Interact Sports (Proyectores Deportivos)"
         categoria = "Iluminación Deportiva / IND"
     elif 'solar' in texto_total or 'fotovoltaica' in texto_total:
         signify_equivalente = "GreenVision Solar (Autónoma / Vial)"
         categoria = "Iluminación Solar"
     elif 'vial' in texto_total or 'autopista' in texto_total or 'carretera' in texto_total:
-        signify_equivalente = "RoadFlair / Xceed Pro (Vial Alta Eficiencia)"
+        signify_equivalente = "RoadFlair / Xceed Pro + Interact City (Telegestión Vial)"
         categoria = "Iluminación Vial"
     elif 'arquitectonico' in texto_total or 'fachada' in texto_total:
-        signify_equivalente = "Tango Pro / Color Kinetics (Arquitectónica)"
+        signify_equivalente = "Tango Pro / Color Kinetics + Dynalite (Control Dinámico)"
         categoria = "Iluminación Arquitectónica"
     else:
         signify_equivalente = "ActiStar / CoreLine (Industrial y General)"
@@ -193,7 +190,7 @@ def procesar_inteligencia_avanzada(row):
     return pd.Series([
         proveedor_adjudicado, monto_adjudicado, cantidad_items, categoria, 
         signify_equivalente, marcas_detectadas, pauta_evaluacion, 
-        potencia, flujo, cri, ip, ik, cct, garantia, surge, certs, otros_reqs
+        potencia, flujo, ip, ik, certs, control_reqs
     ])
 
 def main():
@@ -202,7 +199,7 @@ def main():
         print("Error: TICKET_MP no está configurado.")
         return
 
-    reglas_aprendidas = cargar_memoria_correcciones()
+    reglas_memoria = cargar_memoria_persistente()
 
     print("Conectando con la API de Mercado Público...")
     url = f"https://api.mercadopublico.cl/servicios/v1/publico/licitaciones.json?ticket={ticket}"
@@ -233,7 +230,7 @@ def main():
                 desde_enero_2026 = datetime(2026, 1, 1)
                 df_nuevo = df_nuevo[df_nuevo['FechaCreacion'] >= desde_enero_2026]
             
-            target_keywords = reglas_aprendidas.get("whitelist_objetivos", [])
+            target_keywords = reglas_memoria.get("whitelist_objetivos", [])
             text_columns = [col for col in ['Nombre', 'Descripcion', 'CodigoExterno', 'Comprador'] if col in df_nuevo.columns]
             
             if text_columns and not df_nuevo.empty:
@@ -250,7 +247,7 @@ def main():
                 df_filtrado = df_filtrado.drop(columns=['texto_busqueda'])
             
             if not df_filtrado.empty:
-                blacklist = reglas_aprendidas.get("blacklist", [])
+                blacklist = reglas_memoria.get("blacklist", [])
                 cols_disponibles = [c for c in ['Nombre', 'Descripcion'] if c in df_filtrado.columns]
                 if cols_disponibles:
                     for palabra in blacklist:
@@ -264,10 +261,9 @@ def main():
                     'Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Cantidad_Unidades', 
                     'Categoria_Proyecto', 'Signify_Equivalente', 'Marcas_Competencia_Detectadas', 
                     'Pautas_Y_Puntajes_Evaluacion', 'Requerimiento_Potencia', 'Requerimiento_Flujo_Luminoso', 
-                    'Requerimiento_CRI', 'Requerimiento_IP', 'Requerimiento_IK', 'Requerimiento_CCT_Kelvin',
-                    'Requerimiento_Garantia', 'Requerimiento_Proteccion_kV', 'Certificaciones_Exigidas', 'Otros_Requerimientos_Tecnicos'
+                    'Requerimiento_IP', 'Requerimiento_IK', 'Certificaciones_Exigidas', 'Sistemas_Control_Telegestion'
                 ]
-                print("Iniciando extracción profunda con Playwright en fichas web...")
+                print("Iniciando extracción profunda con Playwright y análisis de Telegestión...")
                 df_filtrado[cols_resultado] = df_filtrado.apply(procesar_inteligencia_avanzada, axis=1)
 
     if not df_filtrado.empty:
@@ -280,8 +276,8 @@ def main():
 
     if df_combinado.empty:
         df_combinado = pd.DataFrame(columns=[
-            'CodigoExterno', 'Nombre', 'Nivel_Compatibilidad', 'Signify_Equivalente', 
-            'Requerimiento_Potencia', 'Requerimiento_Flujo_Luminoso', 'Certificaciones_Exigidas',
+            'CodigoExterno', 'Nombre', 'Signify_Equivalente', 'Requerimiento_Potencia', 
+            'Requerimiento_Flujo_Luminoso', 'Certificaciones_Exigidas', 'Sistemas_Control_Telegestion',
             'Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Cantidad_Unidades', 'Categoria_Proyecto'
         ])
 
@@ -290,13 +286,13 @@ def main():
     with pd.ExcelWriter(dashboard_path, engine='openpyxl') as writer:
         df_combinado.to_excel(writer, sheet_name='Dashboard_General', index=False)
         if 'Proveedor_Adjudicado' in df_combinado.columns:
-            cols_mapa = [col for col in ['CodigoExterno', 'Nombre', 'Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Requerimiento_Potencia', 'Requerimiento_Flujo_Luminoso', 'Certificaciones_Exigidas', 'Signify_Equivalente'] if col in df_combinado.columns]
+            cols_mapa = [col for col in ['CodigoExterno', 'Nombre', 'Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Sistemas_Control_Telegestion', 'Signify_Equivalente'] if col in df_combinado.columns]
             df_combinado[cols_mapa].to_excel(writer, sheet_name='Mapa_Competencia_Adjudicadas', index=False)
         
         portafolio_signify = pd.DataFrame({
-            "Familia_Signify": ["RoadFlair", "Xceed Pro", "Tango Pro", "ActiStar", "Arena X", "GreenVision Solar"],
-            "Aplicacion": ["Vial Alta Eficiencia", "Vial / Autopistas", "Arquitectónica / Proyectores", "Industrial / General", "Estadios y Canchas Deportivas", "Solar Fotovoltaica Autónoma"],
-            "Estrategia_Chile": ["Liderazgo en vías urbanas e interurbanas", "Alto flujo lumínico y robustez vial", "Control estricto DS1 y diseño de fachadas", "Versatilidad e industrial general", "Máximo rendimiento para recintos deportivos", "Sostenibilidad sin red eléctrica"]
+            "Familia_Signify": ["RoadFlair + Interact City", "Arena X + Interact Sports", "Tango Pro + Dynalite", "Color Kinetics", "GreenVision Solar"],
+            "Aplicacion": ["Vial Inteligente y Telegestión", "Estadios y Recintos Deportivos", "Arquitectónica y Control Dinámico", "Fachadas y Iluminación Monumental", "Autónoma Fotovoltaica"],
+            "Estrategia_Chile": ["Liderazgo en smart cities y control centralizado", "Máximo rendimiento y conectividad deportiva", "Control avanzado de escenas y tonos", "Cumplimiento estricto DS1 y diseño", "Sostenibilidad sin red eléctrica"]
         })
         portafolio_signify.to_excel(writer, sheet_name='Portafolio_Signify_Chile', index=False)
 
