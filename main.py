@@ -20,7 +20,7 @@ def cargar_memoria_correcciones():
             "polideportivo", "proyector deportivo", "proyectores deportivos",
             "mantenimiento", "conservacion", "conservación", "alumbrado publico", 
             "alumbrado público", "reposicion", "reposición", "recambio", 
-            "luminaria", "luminarias", "foco vial"
+            "luminaria", "luminarias", "foco vial", "ind", "instituto nacional de deportes"
         ]
     }
     if os.path.exists(CONFIG_PATH):
@@ -68,9 +68,12 @@ def procesar_datos_adjudicacion(row):
 
     texto_total = texto_base.lower()
     
-    if 'estadio' in texto_total or 'cancha' in texto_total or 'deportivo' in texto_total:
-        signify_equivalente = "Arena X (Proyector Deportivo Alta Gama)"
-        categoria = "Iluminación Deportiva"
+    # Identificar si pertenece al IND o referencia deportiva directa
+    es_ind = 'ind' in texto_total or 'instituto nacional de deporte' in texto_total or 'instituto nacional del deporte' in texto_total
+    
+    if 'estadio' in texto_total or 'cancha' in texto_total or 'deportivo' in texto_total or es_ind:
+        signify_equivalente = "Arena X / Proyectores Deportivos Alta Gama"
+        categoria = "Iluminación Deportiva / IND"
     elif 'solar' in texto_total or 'fotovoltaica' in texto_total:
         signify_equivalente = "GreenVision Solar (Autónoma / Vial)"
         categoria = "Iluminación Solar"
@@ -117,23 +120,32 @@ def main():
         if licitaciones:
             df_nuevo = pd.DataFrame(licitaciones)
             
+            # Memoria desde Enero 2026
             if 'FechaCreacion' in df_nuevo.columns:
                 df_nuevo['FechaCreacion'] = pd.to_datetime(df_nuevo['FechaCreacion'], errors='coerce')
                 desde_enero_2026 = datetime(2026, 1, 1)
                 df_nuevo = df_nuevo[df_nuevo['FechaCreacion'] >= desde_enero_2026]
             
             target_keywords = reglas_aprendidas.get("whitelist_objetivos", [])
-            text_columns = [col for col in ['Nombre', 'Descripcion', 'CodigoExterno'] if col in df_nuevo.columns]
+            text_columns = [col for col in ['Nombre', 'Descripcion', 'CodigoExterno', 'Comprador'] if col in df_nuevo.columns]
             
             if text_columns and not df_nuevo.empty:
                 df_nuevo['texto_busqueda'] = df_nuevo[text_columns].astype(str).agg(' '.join, axis=1).str.lower()
                 pattern = '|'.join(target_keywords)
-                df_filtrado = df_nuevo[df_nuevo['texto_busqueda'].str.contains(pattern, na=False, case=False)].copy()
+                
+                # Criterio ampliado: captura patrones de iluminación, IND o códigos de ejemplo específicos
+                codigos_objetivo = ['2378-40-lr25', '858-190-lr25']
+                
+                mask_keywords = df_nuevo['texto_busqueda'].str.contains(pattern, na=False, case=False)
+                mask_codigos = df_nuevo['CodigoExterno'].astype(str).str.lower().isin(codigos_objetivo)
+                mask_ind = df_nuevo['texto_busqueda'].str.contains('ind|instituto nacional', na=False, case=False)
+                
+                df_filtrado = df_nuevo[mask_keywords | mask_codigos | mask_ind].copy()
                 df_filtrado = df_filtrado.drop(columns=['texto_busqueda'])
             else:
                 df_filtrado = pd.DataFrame()
             
-            # FILTRO DE EXCLUSIÓN (BLACKLIST) SEGURO ANTE COLUMNAS FALTANTES
+            # Filtro de exclusión estricta (Blacklist)
             if not df_filtrado.empty:
                 blacklist = reglas_aprendidas.get("blacklist", [])
                 cols_disponibles = [c for c in ['Nombre', 'Descripcion'] if c in df_filtrado.columns]
@@ -168,9 +180,9 @@ def main():
                     })
                     portafolio_signify.to_excel(writer, sheet_name='Portafolio_Signify_Chile', index=False)
 
-                print("¡Dashboard Ejecutivo de Inteligencia de Mercado generado con éxito!")
+                print("¡Dashboard Ejecutivo actualizado con enfoque IND y patrones específicos!")
             else:
-                print("No se encontraron registros nuevos tras aplicar filtros y memoria histórica.")
+                print("No se encontraron registros nuevos tras aplicar los filtros avanzados.")
         else:
             print("No hay licitaciones en la respuesta general de la API.")
     else:
