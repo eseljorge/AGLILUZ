@@ -68,7 +68,6 @@ def procesar_datos_adjudicacion(row):
 
     texto_total = texto_base.lower()
     
-    # Identificar si pertenece al IND o referencia deportiva directa
     es_ind = 'ind' in texto_total or 'instituto nacional de deporte' in texto_total or 'instituto nacional del deporte' in texto_total
     
     if 'estadio' in texto_total or 'cancha' in texto_total or 'deportivo' in texto_total or es_ind:
@@ -133,8 +132,8 @@ def main():
                 df_nuevo['texto_busqueda'] = df_nuevo[text_columns].astype(str).agg(' '.join, axis=1).str.lower()
                 pattern = '|'.join(target_keywords)
                 
-                # Criterio ampliado: captura patrones de iluminación, IND o códigos de ejemplo específicos
-                codigos_objetivo = ['2378-40-lr25', '858-190-lr25']
+                # Incorporación de los IDs específicos solicitados (incluyendo 4483-17-LR26)
+                codigos_objetivo = ['2378-40-lr25', '858-190-lr25', '4483-17-lr26']
                 
                 mask_keywords = df_nuevo['texto_busqueda'].str.contains(pattern, na=False, case=False)
                 mask_codigos = df_nuevo['CodigoExterno'].astype(str).str.lower().isin(codigos_objetivo)
@@ -180,7 +179,7 @@ def main():
                     })
                     portafolio_signify.to_excel(writer, sheet_name='Portafolio_Signify_Chile', index=False)
 
-                print("¡Dashboard Ejecutivo actualizado con enfoque IND y patrones específicos!")
+                print("¡Dashboard Ejecutivo actualizado con los IDs específicos (incluyendo 4483-17-LR26)! pista libre.")
             else:
                 print("No se encontraron registros nuevos tras aplicar los filtros avanzados.")
         else:
