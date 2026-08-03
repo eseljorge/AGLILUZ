@@ -1,22 +1,17 @@
 import os
 import requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from pypdf import PdfReader
 import io
 
 def extraer_texto_desde_url(url):
-    """
-    Descarga y extrae texto de un documento PDF (bases técnicas/administrativas)
-    utilizando pypdf para su análisis.
-    """
     try:
         response = requests.get(url, timeout=15)
         if response.status_code == 200 and 'application/pdf' in response.headers.get('content-type', '').lower():
             with io.BytesIO(response.content) as f:
                 reader = PdfReader(f)
                 texto_completo = ""
-                # Leer las primeras páginas clave donde se especifican los requerimientos técnicos
                 for page in reader.pages[:8]:
                     texto_completo += page.extract_text() or ""
             return texto_completo.lower()
@@ -25,13 +20,8 @@ def extraer_texto_desde_url(url):
     return ""
 
 def evaluar_cumplimiento_bases(row):
-    """
-    Analiza el texto de la licitación y el documento PDF adjunto (si existe)
-    para validar si es posible cumplir técnicamente con las bases y la norma DS1.
-    """
     texto_base = str(row.get('Nombre', '')) + " " + str(row.get('Descripcion', ''))
     
-    # Si la API entrega enlaces a documentos o bases adjuntas, los incorporamos al análisis
     enlace_doc = row.get('Enlace', '') or row.get('Adjudicacion', '')
     texto_pdf = ""
     if enlace_doc and isinstance(enlace_doc, str) and ('http' in enlace_doc):
@@ -39,31 +29,28 @@ def evaluar_cumplimiento_bases(row):
         
     texto_total = (texto_base + " " + texto_pdf).lower()
     
-    # Criterios de exigencia técnica en bases
     exige_led = 'led' in texto_total or 'eficiencia energetica' in texto_total or 'eficiencia energética' in texto_total
     exige_fotometria = 'fotometria' in texto_total or 'fotometría' in texto_total or 'curva' in texto_total or 'fhs' in texto_total
     exige_norma = 'decreto' in texto_total or 'ds1' in texto_total or 'norma' in texto_total or 'emision' in texto_total or 'emisión' in texto_total
     exige_control = 'telegestion' in texto_total or 'telegestión' in texto_total or 'control' in texto_total or 'dimming' in texto_total
     
-    # Validación de compatibilidad con el portafolio Philips / Signify y norma DS1
-    # Alta compatibilidad: Se requiere iluminación LED, cumple con requerimientos fotométricos/normativos y es factible técnicamente.
-    if exige_led and (exige_fotometria or exige_norma or exige_control):
+    if exige_led and (exige_fotometria or exige_norma or exige_control or 'alumbrado' in texto_total or 'luminaria' in texto_total):
         compatibilidad = "Alta"
         if 'estadio' in texto_total or 'cancha' in texto_total:
-            propuesta = "Proyectores Philips ArenaVision + Sistema Interact Sports (Cumplimiento FHS 0%)"
+            propuesta = "Proyectores Philips ArenaVision + Sistema Interact Sports (FHS 0%)"
         elif 'telegestion' in texto_total or 'smart city' in texto_total:
             propuesta = "Luminarias Viales Philips Luma/RoadGrade + Plataforma Interact City"
         else:
             propuesta = "Luminarias LED Philips de alta eficiencia con certificación fotométrica y cumplimiento DS1"
-        auditoria_ds1 = "Verificado en bases: Factible cumplir con límite de flujo hemisferio superior y temperatura de color permitida."
+        auditoria_ds1 = "Verificado en bases: Factible cumplir con límite de flujo hemisferio superior y temperatura de color."
     elif exige_led:
         compatibilidad = "Media"
         propuesta = "Luminaria LED General / CoreLine / Módulo estándar"
-        auditoria_ds1 = "Requiere revisión detallada de las bases administrativas para asegurar cumplimiento de potencia y fotometría."
+        auditoria_ds1 = "Requiere revisión de bases administrativas para asegurar cumplimiento de potencia y fotometría."
     else:
         compatibilidad = "Baja"
-        propuesta = "Sin coincidencia técnica directa con especificaciones del portafolio"
-        auditoria_ds1 = "Fuera de alcance o sin requerimientos claros de iluminación especializada."
+        propuesta = "Luminaria genérica o sin especificación detallada"
+        auditoria_ds1 = "Verificar alcance técnico en terreno o bases."
         
     return pd.Series([compatibilidad, propuesta, auditoria_ds1])
 
@@ -76,7 +63,7 @@ def enviar_alerta_telegram(mensaje):
         payload = {"chat_id": chat_id, "text": mensaje, "parse_mode": "Markdown"}
         try:
             requests.post(url, json=payload)
-            print("Alerta de alta compatibilidad técnica enviada por Telegram.")
+            print("Alerta enviada por Telegram exitosamente.")
         except Exception as e:
             print(f"Error al enviar alerta a Telegram: {e}")
 
@@ -92,48 +79,75 @@ def main():
     response = requests.get(url)
     os.makedirs('agliluz', exist_ok=True)
     
+    historial_path = 'agliluz/historial_licitaciones.xlsx'
+    reporte_path = 'agliluz/reporte_licitaciones.xlsx'
+    
+    # 1. Cargar historial acumulado previo si existe
+    df_historico = pd.DataFrame()
+    if os.path.exists(historial_path):
+        try:
+            df_historico = pd.read_excel(historial_path)
+            print(f"Historial previo cargado: {len(df_historico)} registros acumulados.")
+        except Exception as e:
+            print(f"Aviso al leer historial previo: {e}")
+
     if response.status_code == 200:
         data = response.json()
-        print("Procesando y auditando bases técnicas y administrativas...")
-        
         licitaciones = data.get('Listado', [])
         if licitaciones:
-            df = pd.DataFrame(licitaciones)
+            df_nuevo = pd.DataFrame(licitaciones)
             
-            keywords = ['iluminacion', 'iluminación', 'luminaria', 'luminarias', 'led', 'alumbrado', 'foco', 'proyector', 'farola', 'vial', 'telegestion', 'telegestión', 'smart city', 'estadio', 'cancha']
-            text_columns = [col for col in ['Nombre', 'Descripcion', 'CodigoExterno'] if col in df.columns]
+            # 2. Filtro temporal de los últimos 10 días
+            if 'FechaCreacion' in df_nuevo.columns:
+                df_nuevo['FechaCreacion'] = pd.to_datetime(df_nuevo['FechaCreacion'], errors='coerce')
+                hace_10_dias = datetime.now() - timedelta(days=10)
+                df_nuevo = df_nuevo[df_nuevo['FechaCreacion'] >= hace_10_dias]
             
-            if text_columns:
-                df['texto_busqueda'] = df[text_columns].astype(str).agg(' '.join, axis=1).str.lower()
-                pattern = '|'.join(keywords)
-                df_filtrado = df[df['texto_busqueda'].str.contains(pattern, na=False, case=False)].copy()
+            # 3. Filtro estricto de iluminación
+            lighting_keywords = [
+                'iluminacion', 'iluminación', 'luminaria', 'luminarias', 
+                'led', 'alumbrado', 'foco', 'focos', 'proyector', 'proyectores', 
+                'farola', 'farolas', 'postacion', 'postación', 'fotometria', 
+                'fotometría', 'telegestion', 'telegestión', 'smart city'
+            ]
+            
+            text_columns = [col for col in ['Nombre', 'Descripcion', 'CodigoExterno'] if col in df_nuevo.columns]
+            
+            if text_columns and not df_nuevo.empty:
+                df_nuevo['texto_busqueda'] = df_nuevo[text_columns].astype(str).agg(' '.join, axis=1).str.lower()
+                pattern = '|'.join(lighting_keywords)
+                df_filtrado = df_nuevo[df_nuevo['texto_busqueda'].str.contains(pattern, na=False, case=False)].copy()
                 df_filtrado = df_filtrado.drop(columns=['texto_busqueda'])
             else:
-                df_filtrado = df
-            
-            output_path = 'agliluz/reporte_licitaciones.xlsx'
+                df_filtrado = pd.DataFrame()
             
             if not df_filtrado.empty:
-                # Auditar cumplimiento contra bases y portafolio
+                # Auditar cumplimiento técnico
                 df_filtrado[['Nivel_Compatibilidad', 'Propuesta_Portafolio', 'Auditoria_Normativa_DS1']] = df_filtrado.apply(evaluar_cumplimiento_bases, axis=1)
                 
-                df_filtrado.to_excel(output_path, index=False)
-                
-                # Filtrar estrictamente las que tienen alta compatibilidad técnica verificada
-                df_alta = df_filtrado[df_filtrado['Nivel_Compatibilidad'] == 'Alta']
-                
-                if not df_alta.empty:
-                    mensaje_alerta = f"🚨 *AGLILUZ - Oportunidad Validada en Bases*\n\nSe detectaron *{len(df_alta)}* licitaciones donde es totalmente factible cumplir los requerimientos técnicos, normativos (DS1) y de portafolio Philips. Revise el reporte en GitHub."
-                    enviar_alerta_telegram(mensaje_alerta)
+                # 4. Fusionar con el historial maestro para no perder nada previo
+                if not df_historico.empty and 'CodigoExterno' in df_historico.columns and 'CodigoExterno' in df_filtrado.columns:
+                    # Unir y eliminar duplicados manteniendo registros históricos y sumando nuevos
+                    df_combinado = pd.concat([df_historico, df_filtrado]).drop_duplicates(subset=['CodigoExterno'], keep='first')
                 else:
-                    print("Reporte generado. No se encontraron procesos con cumplimiento técnico de Alta Compatibilidad en esta ejecución.")
+                    df_combinado = df_filtrado if df_historico.empty else pd.concat([df_historico, df_filtrado])
                 
-                print(f"¡Éxito! Procesadas {len(df_filtrado)} licitaciones totales con auditoría de bases.")
+                # Guardar en ambos archivos (historial persistente y reporte para artefactos)
+                df_combinado.to_excel(historial_path, index=False)
+                df_combinado.to_excel(reporte_path, index=False)
+                
+                # Alerta solo para los de alta compatibilidad recién detectados
+                df_alta = df_filtrado[df_filtrado['Nivel_Compatibilidad'] == 'Alta']
+                if not df_alta.empty:
+                    enviar_alerta_telegram(f"🚨 *AGLILUZ - Nuevas Oportunidades (Últimos 10 días)*\n\nSe detectaron *{len(df_alta)}* procesos nuevos de iluminación compatibles con Philips y DS1. Historial acumulado actualizado.")
+                
+                print(f"¡Éxito! Historial actualizado. Total acumulado: {len(df_combinado)} registros.")
             else:
-                print("No se encontraron coincidencias generales.")
-                df.head(0).to_excel(output_path, index=False)
+                print("No se encontraron nuevas licitaciones de iluminación en esta ejecución. Se conserva el historial previo.")
+                if not df_historico.empty:
+                    df_historico.to_excel(reporte_path, index=False)
         else:
-            print("No hay licitaciones en el listado general.")
+            print("No hay licitaciones en el listado general de la API.")
     else:
         print(f"Error al conectar con la API: {response.status_code}")
 
