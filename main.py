@@ -19,21 +19,53 @@ def main():
     
     if response.status_code == 200:
         data = response.json()
-        print("Conexión exitosa. Procesando datos...")
+        print("Conexión exitosa. Procesando y filtrando datos...")
         
         licitaciones = data.get('Listado', [])
         if licitaciones:
             df = pd.DataFrame(licitaciones)
+            
+            # Palabras clave orientadas al rubro de iluminación y proyectos técnicos
+            keywords = [
+                'iluminacion', 'iluminación', 'luminaria', 'luminarias', 
+                'led', 'alumbrado', 'foco', 'proyector', 'farola', 
+                'vial', 'optica', 'óptica', 'postacion', 'postación',
+                'fotometria', 'fotometría', 'proyectores'
+            ]
+            
+            # Identificar columnas de texto disponibles en la respuesta de la API
+            text_columns = [col for col in ['Nombre', 'Descripcion', 'CodigoExterno'] if col in df.columns]
+            
+            if text_columns:
+                # Unificar texto en minúsculas para realizar una búsqueda robusta
+                df['texto_busqueda'] = df[text_columns].astype(str).agg(' '.join, axis=1).str.lower()
+                
+                # Crear patrón de búsqueda con las palabras clave
+                pattern = '|'.join(keywords)
+                df_filtrado = df[df['texto_busqueda'].str.contains(pattern, na=False, case=False)].copy()
+                
+                # Limpiar columna temporal
+                df_filtrado = df_filtrado.drop(columns=['texto_busqueda'])
+            else:
+                df_filtrado = df
+            
             output_path = 'agliluz/reporte_licitaciones.xlsx'
-            df.to_excel(output_path, index=False)
-            print(f"Reporte guardado exitosamente en {output_path}")
+            
+            if not df_filtrado.empty:
+                df_filtrado.to_excel(output_path, index=False)
+                print(f"¡Éxito! Se encontraron {len(df_filtrado)} licitaciones relacionadas con iluminación. Archivo guardado.")
+            else:
+                print("No se encontraron licitaciones nuevas con las palabras clave de iluminación en esta ejecución.")
+                # Guardar un Excel vacío pero estructurado para que el artefacto no falle
+                df.head(0).to_excel(output_path, index=False)
+                with open('agliluz/resumen.txt', 'w') as f:
+                    f.write(f"Ejecución limpia sin coincidencias de iluminación el {datetime.now()}")
         else:
-            print("No se encontraron licitaciones en esta ejecución.")
+            print("No se encontraron licitaciones en el listado general de la API.")
             with open('agliluz/resumen.txt', 'w') as f:
-                f.write(f"Ejecución realizada sin registros el {datetime.now()}")
+                f.write(f"Ejecución sin registros generales el {datetime.now()}")
     else:
         print(f"Error al conectar con la API: {response.status_code}")
-        # Guardar archivo de respaldo para evitar que la tarea falle por carpeta vacía
         with open('agliluz/error_log.txt', 'w') as f:
             f.write(f"Error API code: {response.status_code} - {datetime.now()}")
 
