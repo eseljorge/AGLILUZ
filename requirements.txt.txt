@@ -1,4 +1,0 @@
-Plaintext
-requests
-pandas
-pypdf
