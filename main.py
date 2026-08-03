@@ -1,9 +1,49 @@
 import os
+import json
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
 from pypdf import PdfReader
 import io
+
+# ==========================================
+# MÓDULO DE MEMORIA Y APRENDIZAJE (CORRECCIONES)
+# ==========================================
+CONFIG_PATH = 'agliluz/correcciones.json'
+
+def cargar_memoria_correcciones():
+    """
+    Carga las reglas aprendidas, exclusiones y preferencias del usuario
+    desde un archivo persistente en el repositorio.
+    """
+    default_config = {
+        "blacklist": [
+            "telemedicina", "pantalla led", "pantallas led", "display", 
+            "displays", "monitor", "monitores", "televisor", "salud", 
+            "hospital", "clinica", "clínica"
+        ],
+        "whitelist_objetivos": [
+            "estadio", "estadios", "cancha", "canchas", "deportivo", 
+            "polideportivo", "proyector deportivo", "proyectores deportivos",
+            "mantenimiento", "conservacion", "conservación", "alumbrado publico", 
+            "alumbrado público", "reposicion", "reposición", "recambio", 
+            "luminaria", "luminarias", "foco vial"
+        ]
+    }
+    
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+                print("Memoria de correcciones cargada exitosamente.")
+                return json.load(f)
+        except Exception as e:
+            print(f"Error al leer memoria de correcciones, usando valores por defecto: {e}")
+            
+    # Si no existe, se crea automáticamente para que persista
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+        json.dump(default_config, f, ensure_ascii=False, indent=4)
+    return default_config
 
 def extraer_texto_desde_url(url):
     try:
@@ -19,7 +59,11 @@ def extraer_texto_desde_url(url):
         print(f"Aviso: No se pudo procesar el documento PDF adjunto: {e}")
     return ""
 
-def evaluar_cumplimiento_bases(row):
+def evaluar_cumplimiento_bases(row, reglas_aprendidas):
+    """
+    Evalúa el texto aplicando estrictamente la memoria de correcciones aprendida
+    (exclusiones y focos de negocio objetivo).
+    """
     texto_base = str(row.get('Nombre', '')) + " " + str(row.get('Descripcion', ''))
     
     enlace_doc = row.get('Enlace', '') or row.get('Adjudicacion', '')
@@ -29,28 +73,31 @@ def evaluar_cumplimiento_bases(row):
         
     texto_total = (texto_base + " " + texto_pdf).lower()
     
-    exige_led = 'led' in texto_total or 'eficiencia energetica' in texto_total or 'eficiencia energética' in texto_total
-    exige_fotometria = 'fotometria' in texto_total or 'fotometría' in texto_total or 'curva' in texto_total or 'fhs' in texto_total
-    exige_norma = 'decreto' in texto_total or 'ds1' in texto_total or 'norma' in texto_total or 'emision' in texto_total or 'emisión' in texto_total
-    exige_control = 'telegestion' in texto_total or 'telegestión' in texto_total or 'control' in texto_total or 'dimming' in texto_total
+    # 1. APLICAR BLACKLIST APRENDIDA (Exclusión estricta)
+    blacklist = reglas_aprendidas.get("blacklist", [])
+    for palabra in blacklist:
+        if palabra in texto_total:
+            return pd.Series(["Excluido", f"Descartado por regla de memoria (Contiene término prohibido: '{palabra}')", "Excluido"])
+
+    # 2. APLICAR OBJETIVOS APRENDIDOS
+    objetivos = reglas_aprendidas.get("whitelist_objetivos", [])
     
-    if exige_led and (exige_fotometria or exige_norma or exige_control or 'alumbrado' in texto_total or 'luminaria' in texto_total):
+    es_estadio_cancha = any(term in texto_total for term in ['estadio', 'cancha', 'canchas', 'deportivo', 'polideportivo', 'proyector deportivo', 'proyectores deportivos'])
+    es_mantenimiento_alumbrado = any(term in texto_total for term in ['mantenimiento', 'conservacion', 'conservación', 'alumbrado publico', 'alumbrado público'])
+    es_reposicion_luminarias = any(term in texto_total for term in ['reposicion', 'reposición', 'recambio', 'luminaria', 'luminarias', 'foco vial'])
+    
+    if es_estadio_cancha:
         compatibilidad = "Alta"
-        if 'estadio' in texto_total or 'cancha' in texto_total:
-            propuesta = "Proyectores Philips ArenaVision + Sistema Interact Sports (FHS 0%)"
-        elif 'telegestion' in texto_total or 'smart city' in texto_total:
-            propuesta = "Luminarias Viales Philips Luma/RoadGrade + Plataforma Interact City"
-        else:
-            propuesta = "Luminarias LED Philips de alta eficiencia con certificación fotométrica y cumplimiento DS1"
-        auditoria_ds1 = "Verificado en bases: Factible cumplir con límite de flujo hemisferio superior y temperatura de color."
-    elif exige_led:
-        compatibilidad = "Media"
-        propuesta = "Luminaria LED General / CoreLine / Módulo estándar"
-        auditoria_ds1 = "Requiere revisión de bases administrativas para asegurar cumplimiento de potencia y fotometría."
+        propuesta = "Proyectores Philips ArenaVision / MasterFlood + Sistema Interact Sports (FHS 0%)"
+        auditoria_ds1 = "Verificado: Iluminación deportiva de alta eficiencia, control óptico y cumplimiento DS1."
+    elif es_mantenimiento_alumbrado or es_reposicion_luminarias:
+        compatibilidad = "Alta"
+        propuesta = "Luminarias Viales Philips (Luma / RoadGrade / CoreLine) + Servicio / Telegestión Interact City"
+        auditoria_ds1 = "Verificado: Recambio/Mantenimiento de alumbrado público con cumplimiento DS1 (FHS 0% y 3000K/2700K)."
     else:
-        compatibilidad = "Baja"
-        propuesta = "Luminaria genérica o sin especificación detallada"
-        auditoria_ds1 = "Verificar alcance técnico en terreno o bases."
+        compatibilidad = "Media"
+        propuesta = "Luminaria LED General / Industrial / Arquitectónica"
+        auditoria_ds1 = "Requiere revisión general de bases técnicas para cumplimiento de norma lumínica."
         
     return pd.Series([compatibilidad, propuesta, auditoria_ds1])
 
@@ -73,6 +120,9 @@ def main():
         print("Error: TICKET_MP no está configurado en las variables de entorno.")
         return
 
+    # Cargar memoria de correcciones aprendidas
+    reglas_aprendidas = cargar_memoria_correcciones()
+
     print("Conectando con la API de Mercado Público...")
     url = f"https://api.mercadopublico.cl/servicios/v1/publico/licitaciones.json?ticket={ticket}"
     
@@ -82,7 +132,7 @@ def main():
     historial_path = 'agliluz/historial_licitaciones.xlsx'
     reporte_path = 'agliluz/reporte_licitaciones.xlsx'
     
-    # 1. Cargar historial acumulado previo si existe
+    # Cargar memoria histórica previa de licitaciones
     df_historico = pd.DataFrame()
     if os.path.exists(historial_path):
         try:
@@ -97,53 +147,53 @@ def main():
         if licitaciones:
             df_nuevo = pd.DataFrame(licitaciones)
             
-            # 2. Filtro temporal de los últimos 10 días
+            # Filtro temporal: últimos 10 días
             if 'FechaCreacion' in df_nuevo.columns:
                 df_nuevo['FechaCreacion'] = pd.to_datetime(df_nuevo['FechaCreacion'], errors='coerce')
                 hace_10_dias = datetime.now() - timedelta(days=10)
                 df_nuevo = df_nuevo[df_nuevo['FechaCreacion'] >= hace_10_dias]
             
-            # 3. Filtro estricto de iluminación
-            lighting_keywords = [
-                'iluminacion', 'iluminación', 'luminaria', 'luminarias', 
-                'led', 'alumbrado', 'foco', 'focos', 'proyector', 'proyectores', 
-                'farola', 'farolas', 'postacion', 'postación', 'fotometria', 
-                'fotometría', 'telegestion', 'telegestión', 'smart city'
-            ]
+            # Palabras clave de búsqueda inicial basadas en los objetivos aprendidos
+            target_keywords = reglas_aprendidas.get("whitelist_objetivos", [])
             
             text_columns = [col for col in ['Nombre', 'Descripcion', 'CodigoExterno'] if col in df_nuevo.columns]
             
             if text_columns and not df_nuevo.empty:
                 df_nuevo['texto_busqueda'] = df_nuevo[text_columns].astype(str).agg(' '.join, axis=1).str.lower()
-                pattern = '|'.join(lighting_keywords)
+                pattern = '|'.join(target_keywords)
                 df_filtrado = df_nuevo[df_nuevo['texto_busqueda'].str.contains(pattern, na=False, case=False)].copy()
                 df_filtrado = df_filtrado.drop(columns=['texto_busqueda'])
             else:
                 df_filtrado = pd.DataFrame()
             
             if not df_filtrado.empty:
-                # Auditar cumplimiento técnico
-                df_filtrado[['Nivel_Compatibilidad', 'Propuesta_Portafolio', 'Auditoria_Normativa_DS1']] = df_filtrado.apply(evaluar_cumplimiento_bases, axis=1)
+                # Aplicar evaluación respetando memoria y correcciones aprendidas
+                df_filtrado[['Nivel_Compatibilidad', 'Propuesta_Portafolio', 'Auditoria_Normativa_DS1']] = df_filtrado.apply(lambda row: evaluar_cumplimiento_bases(row, reglas_aprendidas), axis=1)
                 
-                # 4. Fusionar con el historial maestro para no perder nada previo
-                if not df_historico.empty and 'CodigoExterno' in df_historico.columns and 'CodigoExterno' in df_filtrado.columns:
-                    # Unir y eliminar duplicados manteniendo registros históricos y sumando nuevos
-                    df_combinado = pd.concat([df_historico, df_filtrado]).drop_duplicates(subset=['CodigoExterno'], keep='first')
+                # Excluir elementos marcados por la memoria de correcciones
+                df_filtrado = df_filtrado[df_filtrado['Nivel_Compatibilidad'] != 'Excluido']
+                
+                if not df_filtrado.empty:
+                    # Fusionar con historial maestro evitando duplicados
+                    if not df_historico.empty and 'CodigoExterno' in df_historico.columns and 'CodigoExterno' in df_filtrado.columns:
+                        df_combinado = pd.concat([df_historico, df_filtrado]).drop_duplicates(subset=['CodigoExterno'], keep='first')
+                    else:
+                        df_combinado = df_filtrado if df_historico.empty else pd.concat([df_historico, df_filtrado])
+                    
+                    df_combinado.to_excel(historial_path, index=False)
+                    df_combinado.to_excel(reporte_path, index=False)
+                    
+                    df_alta = df_filtrado[df_filtrado['Nivel_Compatibilidad'] == 'Alta']
+                    if not df_alta.empty:
+                        enviar_alerta_telegram(f"🚨 *AGLILUZ - Oportunidades Clave Detectadas*\n\nSe detectaron *{len(df_alta)}* procesos nuevos de alta compatibilidad (Estadios, canchas, recambio o mantenimiento de alumbrado) aptos para Philips y norma DS1.")
+                    
+                    print(f"¡Éxito! Historial actualizado aplicando memoria de correcciones. Total acumulado: {len(df_combinado)} registros.")
                 else:
-                    df_combinado = df_filtrado if df_historico.empty else pd.concat([df_historico, df_filtrado])
-                
-                # Guardar en ambos archivos (historial persistente y reporte para artefactos)
-                df_combinado.to_excel(historial_path, index=False)
-                df_combinado.to_excel(reporte_path, index=False)
-                
-                # Alerta solo para los de alta compatibilidad recién detectados
-                df_alta = df_filtrado[df_filtrado['Nivel_Compatibilidad'] == 'Alta']
-                if not df_alta.empty:
-                    enviar_alerta_telegram(f"🚨 *AGLILUZ - Nuevas Oportunidades (Últimos 10 días)*\n\nSe detectaron *{len(df_alta)}* procesos nuevos de iluminación compatibles con Philips y DS1. Historial acumulado actualizado.")
-                
-                print(f"¡Éxito! Historial actualizado. Total acumulado: {len(df_combinado)} registros.")
+                    print("Tras aplicar la memoria de correcciones y filtros estrictos, no quedaron registros nuevos.")
+                    if not df_historico.empty:
+                        df_historico.to_excel(reporte_path, index=False)
             else:
-                print("No se encontraron nuevas licitaciones de iluminación en esta ejecución. Se conserva el historial previo.")
+                print("No se encontraron licitaciones con los criterios de memoria objetivo.")
                 if not df_historico.empty:
                     df_historico.to_excel(reporte_path, index=False)
         else:
