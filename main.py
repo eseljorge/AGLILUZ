@@ -11,10 +11,6 @@ from playwright.sync_api import sync_playwright
 MEMORY_PATH = 'memory.md'
 
 def cargar_memoria_persistente():
-    """
-    Lee la memoria persistente (memory.md) y extrae dinámicamente palabras 
-    vetadas (blacklist) o reglas añadidas por el usuario.
-    """
     default_config = {
         "blacklist": [
             "telemedicina", "pantalla led", "pantallas led", "display", 
@@ -27,33 +23,31 @@ def cargar_memoria_persistente():
             "mantenimiento", "conservacion", "conservación", "alumbrado publico", 
             "alumbrado público", "reposicion", "reposición", "recambio", 
             "luminaria", "luminarias", "foco vial", "ind", "instituto nacional de deportes",
-            "telegestion", "telegestión", "interact", "dynalite"
+            "telegestion", "telegestión", "interact", "dynalite", "zhaga", "nema"
         ]
     }
     
     if os.path.exists(MEMORY_PATH):
         try:
             with open(MEMORY_PATH, 'r', encoding='utf-8') as f:
-                contenido = f.read().lower()
-                if "blacklist:" in contenido or "exclusiones" in contenido:
-                    pass
+                pass
         except Exception:
             pass
     else:
         os.makedirs(os.path.dirname(MEMORY_PATH) if os.path.dirname(MEMORY_PATH) else '.', exist_ok=True)
         with open(MEMORY_PATH, 'w', encoding='utf-8') as f:
-            f.write("# 🧠 Memory.md - AgliLuz (Memoria Persistente de Aprendizaje)\n\n## 1. Blacklist Dinámica\n- telemedicina\n- pantallas led comerciales\n")
+            f.write("# 🧠 Memory.md - AgliLuz (Memoria Persistente de Aprendizaje)\n\n## 1. Blacklist Dinámica\n- telemedicina\n")
             
     return default_config
 
 def extraer_texto_desde_url(url):
     try:
-        response = requests.get(url, timeout=20)
-        if response.status_code == 200 and 'application/pdf' in response.headers.get('content-type', '').lower():
+        response = requests.get(url, timeout=25)
+        if response.status_code == 200 and ('application/pdf' in response.headers.get('content-type', '').lower() or 'pdf' in url.lower()):
             with io.BytesIO(response.content) as f:
                 reader = PdfReader(f)
                 texto_completo = ""
-                for page in reader.pages[:20]:
+                for page in reader.pages[:30]: # Lectura ampliada para mayor profundidad en bases
                     texto_completo += page.extract_text() or ""
             return texto_completo.lower()
     except Exception:
@@ -62,50 +56,77 @@ def extraer_texto_desde_url(url):
 
 def extraer_detalle_profundo_web(codigo_externo):
     """
-    Entra a la ficha de Mercado Público mediante Playwright para extraer 
-    recuadros internos (Cuadro de ofertas, marcas y telegestión).
+    Navega profundamente en la ficha de Mercado Público extrayendo texto general,
+    cuadros de ofertas y buscando enlaces directos a documentos adjuntos y bases técnicas.
     """
     url_ficha = f"https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?id={codigo_externo}"
-    resultado_web = {
+    resultado_profundo = {
         "Competencia_Web": "No especificado en ficha web",
-        "Detalle_Ofertas_Web": "Sin cuadro de ofertas abierto"
+        "Detalle_Ofertas_Web": "Sin cuadro de ofertas abierto",
+        "Texto_Adjuntos_Profundo": ""
     }
+    
+    links_documentos = []
     
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
-            page.goto(url_ficha, timeout=35000)
+            page.goto(url_ficha, timeout=40000)
             page.wait_for_load_state('domcontentloaded', timeout=15000)
             
+            # Extraer texto principal de la página
             texto_ficha = page.inner_text('body').lower()
+            resultado_profundo["Texto_Adjuntos_Profundo"] += " " + texto_ficha
             
-            if "cuadro de ofertas" in texto_ficha or "oferta" in texto_ficha:
-                resultado_web["Detalle_Ofertas_Web"] = "Cuadro de ofertas detectado y procesado desde la web"
+            # Buscar enlaces a documentos (Ver adjuntos, aclaraciones, bases)
+            elementos_a = page.query_selector_all('a')
+            for el in elementos_a:
+                href = el.get_attribute('href')
+                if href and ('pdf' in href.lower() or 'descarga' in href.lower() or 'document' in href.lower() or 'file' in href.lower()):
+                    if href.startswith('http'):
+                        links_documentos.append(href)
+                    elif href.startswith('/'):
+                        links_documentos.append(f"https://www.mercadopublico.cl{href}")
             
+            # Detección de competencia en la web
             if "ge lighting" in texto_ficha:
-                resultado_web["Competencia_Web"] = "GE Lighting"
+                resultado_profundo["Competencia_Web"] = "GE Lighting"
             elif "osram" in texto_ficha or "ledvance" in texto_ficha:
-                resultado_web["Competencia_Web"] = "Osram / Ledvance"
+                resultado_profundo["Competencia_Web"] = "Osram / Ledvance"
             elif "cree" in texto_ficha:
-                resultado_web["Competencia_Web"] = "Cree Lighting"
-            elif "philips" in texto_ficha:
-                resultado_web["Competencia_Web"] = "Philips / Signify"
+                resultado_profundo["Competencia_Web"] = "Cree Lighting"
+            elif "philips" in texto_ficha or "signify" in texto_ficha:
+                resultado_profundo["Competencia_Web"] = "Philips / Signify"
             else:
-                resultado_web["Competencia_Web"] = "Competencia Local / Alternativa"
+                resultado_profundo["Competencia_Web"] = "Competencia Local / Alternativa"
+
+            if "cuadro de ofertas" in texto_ficha or "oferta" in texto_ficha:
+                resultado_profundo["Detalle_Ofertas_Web"] = "Cuadro de ofertas procesado"
                 
             browser.close()
     except Exception as e:
         print(f"Nota Playwright en {codigo_externo}: {e}")
         
-    return resultado_web
+    # Descargar y analizar texto de hasta 3 documentos adjuntos encontrados en la ficha
+    texto_pdfs_extraido = ""
+    for link_doc in set(links_documentos[:3]):
+        texto_pdfs_extraido += " " + extraer_texto_desde_url(link_doc)
+        
+    resultado_profundo["Texto_Adjuntos_Profundo"] += " " + texto_pdfs_extraido
+    return resultado_profundo
 
 def extraer_parametros_tecnicos_bases(texto):
+    # Extracción granular de potencia (W)
     potencias = re.findall(r'(\d+[\.,]?\d*)\s*(?:w|watt|watts)', texto, re.IGNORECASE)
     potencia_str = ", ".join(sorted(list(set(potencias)))) + " W" if potencias else "No especificado en bases"
 
+    # Extracción granular de flujo lumínico (lm)
     flujos = re.findall(r'(\d+[\.,]?\d*)\s*(?:lm|lumenes|lúmenes)', texto, re.IGNORECASE)
-    flujo_str = ", ".join(sorted(list(set(flujos)))) + " lm" if flujos else "No especificado en bases"
+    flujo_str = ", ".join(sorted(list(set(flujos)))) + " lm" if flujo_str else "No especificado en bases"
+    # Corrección de asignación segura
+    if not flujo_str and flujos:
+        flujo_str = ", ".join(sorted(list(set(flujos)))) + " lm"
 
     ip_match = re.findall(r'ip\s*([0-6][5678])', texto, re.IGNORECASE)
     ip_str = "IP" + ", ".join(sorted(list(set(ip_match)))) if ip_match else "No especificado"
@@ -119,9 +140,9 @@ def extraer_parametros_tecnicos_bases(texto):
     cert_str = " | ".join(certificaciones) if certificaciones else "Normativa estándar de licitación"
 
     telegestion_detectada = []
-    if 'telegestion' in texto or 'telegestión' in texto: telegestion_detectada.append("Exige Telegestión")
-    if 'zhaga' in texto: telegestion_detectada.append("Zócalo Zhaga")
-    if 'nema' in texto: telegestion_detectada.append("Zócalo NEMA")
+    if 'telegestion' in texto or 'telegestión' in texto or 'control centralizado' in texto: telegestion_detectada.append("Exige Telegestión")
+    if 'zhaga' in texto or 'zócalo zhaga' in texto: telegestion_detectada.append("Zócalo Zhaga")
+    if 'nema' in texto or 'zócalo nema' in texto: telegestion_detectada.append("Zócalo NEMA")
     if 'interact' in texto: telegestion_detectada.append("Plataforma Interact")
     if 'dynalite' in texto: telegestion_detectada.append("Sistema Dynalite")
     
@@ -133,6 +154,7 @@ def procesar_inteligencia_avanzada(row):
     codigo = str(row.get('CodigoExterno', ''))
     texto_base = str(row.get('Nombre', '')) + " " + str(row.get('Descripcion', ''))
     
+    # Documentos adjuntos desde la API
     documentos = row.get('Documentos', [])
     texto_documentos_adjuntos = ""
     if isinstance(documentos, list):
@@ -141,6 +163,7 @@ def procesar_inteligencia_avanzada(row):
             if url_doc and isinstance(url_doc, str) and url_doc.startswith('http'):
                 texto_documentos_adjuntos += " " + extraer_texto_desde_url(url_doc)
 
+    # Extracción profunda desde la web y adjuntos de la ficha
     datos_web = extraer_detalle_profundo_web(codigo)
 
     adjudicacion_info = row.get('Adjudicacion', {})
@@ -158,7 +181,8 @@ def procesar_inteligencia_avanzada(row):
                 cantidad_items += float(item.get('Cantidad', 0) or 0)
                 monto_adjudicado += float(item.get('Total', 0) or 0)
 
-    texto_total = (texto_base + " " + texto_documentos_adjuntos).lower()
+    # Texto total enriquecido con bases de API, texto web y PDFs navegados
+    texto_total = (texto_base + " " + texto_documentos_adjuntos + " " + datos_web.get("Texto_Adjuntos_Profundo", "")).lower()
     
     potencia, flujo, ip, ik, certs, control_reqs = extraer_parametros_tecnicos_bases(texto_total)
     marcas_detectadas = datos_web.get("Competencia_Web", "Marca Alternativa")
@@ -175,7 +199,7 @@ def procesar_inteligencia_avanzada(row):
     elif 'solar' in texto_total or 'fotovoltaica' in texto_total:
         signify_equivalente = "GreenVision Solar (Autónoma / Vial)"
         categoria = "Iluminación Solar"
-    elif 'vial' in texto_total or 'autopista' in texto_total or 'carretera' in texto_total:
+    elif 'vial' in texto_total or 'autopista' in texto_total or 'carretera' in texto_total or 'alumbrado publico' in texto_total:
         signify_equivalente = "RoadFlair / Xceed Pro + Interact City (Telegestión Vial)"
         categoria = "Iluminación Vial"
     elif 'arquitectonico' in texto_total or 'fachada' in texto_total:
@@ -261,10 +285,10 @@ def main():
                     'Pautas_Y_Puntajes_Evaluacion', 'Requerimiento_Potencia', 'Requerimiento_Flujo_Luminoso', 
                     'Requerimiento_IP', 'Requerimiento_IK', 'Certificaciones_Exigidas', 'Sistemas_Control_Telegestion'
                 ]
-                print("Iniciando extracción profunda con Playwright y análisis de Telegestión...")
+                print("Iniciando análisis profundo en anexos, bases técnicas y adjuntos web...")
                 df_filtrado[cols_resultado] = df_filtrado.apply(procesar_inteligencia_avanzada, axis=1)
 
-    # LIMPIEZA AUTOMÁTICA DE DATOS DE EJEMPLO
+    # Limpieza y consolidación de historial
     if not df_filtrado.empty:
         if not df_historico.empty:
             cols_check = [c for c in ['Nombre', 'CodigoExterno'] if c in df_historico.columns]
@@ -274,12 +298,10 @@ def main():
                     mask_ejemplo = mask_ejemplo | df_historico[c].astype(str).str.contains('Ejemplo|ejemplo|\[Ejemplo\]', na=False, regex=True)
                 df_historico = df_historico[~mask_ejemplo]
             
-            # Combinar datos nuevos (prioridad) con históricos limpios
             df_combinado = pd.concat([df_filtrado, df_historico]).drop_duplicates(subset=['CodigoExterno'], keep='first')
         else:
             df_combinado = df_filtrado
     else:
-        # Si no hubo filtrado nuevo, al menos limpiamos el histórico
         if not df_historico.empty:
             cols_check = [c for c in ['Nombre', 'CodigoExterno'] if c in df_historico.columns]
             if cols_check:
@@ -311,7 +333,7 @@ def main():
         })
         portafolio_signify.to_excel(writer, sheet_name='Portafolio_Signify_Chile', index=False)
 
-    print(f"¡Proceso finalizado con éxito! Total registros analizados: {len(df_combinado)}")
+    print(f"¡Proceso profundo finalizado con éxito! Total registros analizados: {len(df_combinado)}")
 
 if __name__ == '__main__':
     main()
