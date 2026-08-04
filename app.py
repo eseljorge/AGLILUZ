@@ -2,146 +2,145 @@ import streamlit as st
 import pandas as pd
 import os
 
-# Configuración de la página web
 st.set_page_config(
-    page_title="AgliLuz - Inteligencia Comercial Signify",
+    page_title="AgliLuz: Inteligencia y Análisis de Licitaciones",
     page_icon="💡",
     layout="wide"
 )
 
-# Título y descripción principal
-st.title("💡 AgliLuz: Plataforma Online de Inteligencia y Análisis de Licitaciones")
-st.markdown("Sistema autónomo de consulta, análisis de bases técnicas y mapeo de competencia para **Signify Chile**.")
+# Estilo visual limpio y profesional
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    </style>
+""", unsafe_allow_html=True)
 
-# Cargar el archivo de historial generado por el agente
-historial_path = 'agliluz/historial_licitaciones.xlsx'
+st.markdown("# 💡 AgliLuz: Plataforma Online de Inteligencia y Análisis de Licitaciones")
+st.markdown("Sistema autónomo de análisis técnico, bases comerciales y mapeo de competencia para **Signify Chile**.")
+
+# Carga de datos reales desde el repositorio o modo demo
+HISTORIAL_PATH = 'agliluz/historial_licitaciones.xlsx'
 
 @st.cache_data
 def cargar_datos():
-    os.makedirs('agliluz', exist_ok=True)
-    if os.path.exists(historial_path):
+    if os.path.exists(HISTORIAL_PATH):
         try:
-            df = pd.read_excel(historial_path)
-            if not df.empty and len(df.columns) > 2:
-                return df
+            df = pd.read_excel(HISTORIAL_PATH)
+            if not df.empty and 'CodigoExterno' in df.columns:
+                # Verificar si son datos reales o ejemplos antiguos
+                if not df['CodigoExterno'].astype(str).str.contains('Ejemplo', case=False).all():
+                    return df, False
         except Exception:
             pass
     
-    # Dataset por defecto para que la app cargue de inmediato con total elegancia
-    return pd.DataFrame({
-        'CodigoExterno': ['2378-40-LR25', '858-190-LR25', '4483-17-LR26'],
-        'Nombre': [
-            '[Ejemplo] Recambio de Luminarias Alumbrado Público Comuna', 
-            '[Ejemplo] Mejoramiento Iluminación Estadio Municipal', 
-            '[Ejemplo] Suministro de Proyectores Deportivos IND'
-        ],
-        'Nivel_Compatibilidad': ['Alta', 'Alta', 'Alta'],
-        'Signify_Equivalente': [
-            'RoadFlair / Xceed Pro (Vial Alta Eficiencia)', 
-            'Arena X (Proyector Deportivo Alta Gama)', 
-            'Arena X / Proyectores Deportivos Alta Gama'
-        ],
-        'Requerimiento_Potencia': ['100 W', '1000 W', '1200 W'],
-        'Requerimiento_Flujo_Luminoso': ['12000 lm', '130000 lm', '150000 lm'],
-        'Certificaciones_Exigidas': ['Certificación SEC | Decreto Supremo N°1', 'Decreto Supremo N°1 (Norma Lumínica)', 'Certificación SEC | DS1'],
-        'Proveedor_Adjudicado': ['Philips / Signify (Ejemplo)', 'Proveedor Competencia A', 'En proceso / Evaluando bases'],
-        'Monto_Adjudicado_CLP': [45000000, 120000000, 85000000],
-        'Cantidad_Unidades': [180, 24, 30],
-        'Categoria_Proyecto': ['Iluminación Vial', 'Iluminación Deportiva / IND', 'Iluminación Deportiva / IND'],
-        'Marcas_Competencia_Detectadas': ['Philips / Signify', 'GE Lighting', 'Pendiente en Actas'],
-        'Pautas_Y_Puntajes_Evaluacion': ['Ponderación: 60% Precio, 40% Técnico', 'Evaluación integral por puntaje', 'Bases administrativas y técnicas revisadas']
+    # Datos de demostración estructurados con formato profesional en caso de no existir archivo local
+    data_demo = pd.DataFrame({
+        'CodigoExterno': ['TÚNEL-LO-RUIZ-2026', '858-190-LR25', '4483-17-LR26'],
+        'Nombre': ['[Ejemplo] Túnel Lo Ruiz - Alumbrado y Control Telensa', '[Ejemplo] Mejoramiento Iluminación Estadio Municipal', '[Ejemplo] Suministro de Proyectores Deportivos IND'],
+        'Categoria_Proyecto': ['Iluminación Vial / Túneles', 'Iluminación Deportiva / IND', 'Iluminación Deportiva / IND'],
+        'Signify_Equivalente': ['RoadFlair / Xceed Pro + Interact City', 'Arena X + Interact Sports', 'Arena X + Interact Sports'],
+        'Requerimiento_Potencia': ['100W - 150W', 'Not Specified', 'Not Specified'],
+        'Requerimiento_Flujo_Luminoso': ['12,000 lm', 'Not Specified', 'Not Specified'],
+        'Certificaciones_Exigidas': ['Certificación SEC | DS1 (Norma Lumínica)', 'Normativa estándar', 'Normativa estándar'],
+        'Sistemas_Control_Telegestion': ['Exige Telegestión / Zócalo Zhaga', 'Sin requerimientos', 'Sin requerimientos'],
+        'Estado_Cumplimiento_Signify': ['Cumple Totalmente (Conectividad IoT)', 'Cumple Totalmente', 'Cumple Totalmente'],
+        'Analisis_Brecha_Tecnica': ['Túnel y vial: RoadFlair con zócalo Zhaga/NEMA sobre plataforma Interact City cumple 100%.', 'Estadio municipal: Arena X cumple requerimientos de rendimiento.', 'Proyecto IND: Arena X cumple rendimiento y DS1.'],
+        'Proveedor_Adjudicado': ['En proceso / Licitación Privada', 'Proveedor Externo A', 'Proveedor Externo B'],
+        'Monto_Adjudicado_CLP': [0, 45000000, 120000000],
+        'Cantidad_Unidades': [50, 120, 240],
+        'Moneda_Oferta': ['Unidad de Fomento (UF)', 'CLP', 'CLP'],
+        'Fecha_Presentacion': ['2026-05-07', '2026-03-15', '2026-04-10'],
+        'Fecha_Adjudicacion_Proyectada': ['2026-08-03', '2026-04-01', '2026-05-01'],
+        'Visita_Terreno': ['No hay por parte del cliente, si se requiere ir solos', 'Obligatoria', 'Facultativa'],
+        'Garantias_Requeridas': ['Boleta Fiel Cumplimiento 10%', 'Boleta Fiel Cumplimiento 5%', 'Boleta Seriedad Oferta'],
+        'Plazo_Entrega_Bodega': ['Primer día hábil de mayo de 2028', '30 días corridos', '45 días corridos'],
+        'Garantia_Producto_Anios': ['5 Años + mediciones anuales', '5 Años', '5 Años']
     })
+    return data_demo, True
 
-df = cargar_datos()
+df_licitaciones, es_demo = cargar_datos()
 
-is_demo = '2378-40-LR25' in df['CodigoExterno'].values and len(df) <= 3
-if is_demo:
-    st.info("ℹ️ **Modo Demostración Activo:** Estás viendo datos de ejemplo en tu plataforma online. En cuanto ejecutes tu flujo en GitHub Actions, se sincronizarán los procesos reales de Mercado Público automáticamente.")
+if es_demo:
+    st.info("ℹ️ **Modo Demostración Activo:** Estás viendo datos de ejemplo estructurados con el formato de fichas comerciales. En cuanto ejecutes tu flujo en GitHub Actions, se sincronizarán los procesos reales.")
 
-# --- BARRA LATERAL DE FILTROS ---
-st.sidebar.header("🔍 Filtros de Consulta")
-
-compatibilidades = ['Todas'] + list(df['Nivel_Compatibilidad'].dropna().unique()) if 'Nivel_Compatibilidad' in df.columns else ['Todas']
-filtro_comp = st.sidebar.selectbox("Nivel de Compatibilidad Técnica", compatibilidades)
-
-categorias = ['Todas'] + list(df['Categoria_Proyecto'].dropna().unique()) if 'Categoria_Proyecto' in df.columns else ['Todas']
-filtro_cat = st.sidebar.selectbox("Categoría de Proyecto", categorias)
-
-busqueda = st.sidebar.text_input("Buscar por ID (ej. 4483-17-LR26), Comprador o Palabra Clave")
-
-# Aplicar filtros
-df_filtrado = df.copy()
-if filtro_comp != 'Todas':
-    df_filtrado = df_filtrado[df_filtrado['Nivel_Compatibilidad'] == filtro_comp]
-if filtro_cat != 'Todas':
-    df_filtrado = df_filtrado[df_filtrado['Categoria_Proyecto'] == filtro_cat]
-if busqueda:
-    mask = df_filtrado.astype(str).apply(lambda x: x.str.contains(busqueda, case=False, na=False)).any(axis=1)
-    df_filtrado = df_filtrado[mask]
-
-# --- MÉTRICAS EJECUTIVAS SUPERIORES ---
+# Métricas principales
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.metric("Total Procesos Analizados", len(df))
+    st.metric("Total Procesos Analizados", len(df_licitaciones))
 with col2:
-    st.metric("Procesos Filtrados Activos", len(df_filtrado))
+    st.metric("Procesos Filtrados Activos", len(df_licitaciones))
 with col3:
-    monto_total = df['Monto_Adjudicado_CLP'].sum() if 'Monto_Adjudicado_CLP' in df.columns else 0
-    st.metric("Volumen Mercado (CLP)", f"${monto_total:,.0f}")
+    volumen_total = df_licitaciones['Monto_Adjudicado_CLP'].sum() if 'Monto_Adjudicado_CLP' in df_licitaciones.columns else 0
+    st.metric("Volumen Mercado (CLP)", f"${volumen_total:,.0f}")
 with col4:
-    altas = len(df[df['Nivel_Compatibilidad'] == 'Alta']) if 'Nivel_Compatibilidad' in df.columns else 0
-    st.metric("Oportunidades Alta Compatibilidad", altas)
+    st.metric("Oportunidades Alta Compatibilidad", len(df_licitaciones))
 
 st.markdown("---")
 
-# --- TABS DE NAVEGACIÓN WEB ---
+# Pestañas principales de la aplicación
 tab1, tab2, tab3 = st.tabs(["📊 Dashboard de Licitaciones", "🏆 Mapa de Competencia y Adjudicadas", "💡 Portafolio Signify Chile"])
 
 with tab1:
     st.subheader("Listado Detallado y Requerimientos Técnicos Extraídos")
-    st.markdown("Consulta rápida de potencias, flujos lumínicos, IP, IK, garantías y certificaciones extraídas de las bases.")
+    st.markdown("Consulta rápida de potencias, flujos lumínicos, IP, IK, garantías y cumplimiento técnico extraído de las bases.")
     
-    columnas_mostrar = [col for col in ['CodigoExterno', 'Nombre', 'Nivel_Compatibilidad', 'Signify_Equivalente', 'Requerimiento_Potencia', 'Requerimiento_Flujo_Luminoso', 'Certificaciones_Exigidas'] if col in df_filtrado.columns]
-    st.dataframe(df_filtrado[columnas_mostrar], use_container_width=True)
-
-    if not df_filtrado.empty:
-        st.markdown("### 🔍 Vista de Detalle Técnico por Licitación")
-        selected_id = st.selectbox("Selecciona un Código Externo para ver su análisis profundo:", df_filtrado['CodigoExterno'].unique())
-        row_detalle = df_filtrado[df_filtrado['CodigoExterno'] == selected_id].iloc[0]
+    # Tabla interactiva principal
+    columnas_mostrar = [c for c in ['CodigoExterno', 'Nombre', 'Categoria_Proyecto', 'Signify_Equivalente', 'Requerimiento_Potencia', 'Estado_Cumplimiento_Signify'] if c in df_licitaciones.columns]
+    st.dataframe(df_licitaciones[columnas_mostrar], use_container_width=True)
+    
+    st.markdown("---")
+    st.subheader("🔍 Vista de Detalle Técnico y Comercial por Licitación")
+    st.markdown("Selecciona un Código Externo para desplegar la ficha completa con plazos, monedas, garantías y requerimientos idénticos a tus plantillas de control:")
+    
+    if not df_licitaciones.empty:
+        codigos_disponibles = df_licitaciones['CodigoExterno'].tolist()
+        codigo_seleccionado = st.selectbox("Selecciona un Código Externo para ver su análisis profundo:", codigos_disponibles)
         
-        dcol1, dcol2 = st.columns(2)
-        with dcol1:
-            st.info(f"**Nombre:** {row_detalle.get('Nombre', 'N/A')}")
-            st.write(f"**Proveedor Adjudicado:** {row_detalle.get('Proveedor_Adjudicado', 'N/A')}")
-            st.write(f"**Monto Adjudicado:** ${row_detalle.get('Monto_Adjudicado_CLP', 0):,.0f} CLP")
-            st.write(f"**Categoría:** {row_detalle.get('Categoria_Proyecto', 'N/A')}")
-            st.write(f"**Solución Signify Sugerida:** {row_detalle.get('Signify_Equivalente', 'N/A')}")
-        with dcol2:
-            st.success(f"**Potencia Requerida:** {row_detalle.get('Requerimiento_Potencia', 'N/A')}")
-            st.success(f"**Flujo Luminoso:** {row_detalle.get('Requerimiento_Flujo_Luminoso', 'N/A')}")
-            st.success(f"**Certificaciones Exigidas:** {row_detalle.get('Certificaciones_Exigidas', 'N/A')}")
+        # Filtrar el registro seleccionado
+        registro = df_licitaciones[df_licitaciones['CodigoExterno'] == codigo_seleccionado].iloc[0]
+        
+        # Despliegue en formato de tarjeta estructurada tipo ficha comercial
+        st.markdown(f"### 📄 Ficha de Proceso: {registro.get('Nombre', 'Sin Nombre')}")
+        
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown(f"**ID / Código Externo:** `{registro.get('CodigoExterno', 'N/A')}`")
+            st.markdown(f"**Categoría:** {registro.get('Categoria_Proyecto', 'N/A')}")
+            st.markdown(f"**Proveedor Adjudicado:** {registro.get('Proveedor_Adjudicado', 'N/A')}")
+            st.markdown(f"**Monto Adjudicado:** ${registro.get('Monto_Adjudicado_CLP', 0):,.0f} CLP")
+            st.markdown(f"**Moneda de la Oferta:** {registro.get('Moneda_Oferta', 'Unidad de Fomento (UF)')}")
+            st.markdown(f"**Fecha Presentación de Oferta:** {registro.get('Fecha_Presentacion', 'N/A')}")
+            st.markdown(f"**Fecha Adjudicación Proyectada:** {registro.get('Fecha_Adjudicacion_Proyectada', 'N/A')}")
+            st.markdown(f"**Visita a Terreno:** {registro.get('Visita_Terreno', 'N/A')}")
+            
+        with col_b:
+            st.markdown(f"**Equivalente Signify:** `{registro.get('Signify_Equivalente', 'N/A')}`")
+            st.markdown(f"**Estado de Cumplimiento:** {registro.get('Estado_Cumplimiento_Signify', 'N/A')}")
+            st.markdown(f"**Potencia Requerida:** {registro.get('Requerimiento_Potencia', 'N/A')}")
+            st.markdown(f"**Flujo Lumínico:** {registro.get('Requerimiento_Flujo_Luminoso', 'N/A')}")
+            st.markdown(f"**Certificaciones / Normativa:** {registro.get('Certificaciones_Exigidas', 'N/A')}")
+            st.markdown(f"**Sistemas de Control / Telegestión:** {registro.get('Sistemas_Control_Telegestion', 'N/A')}")
+            st.markdown(f"**Garantías Requeridas:** {registro.get('Garantias_Requeridas', 'N/A')}")
+            st.markdown(f"**Garantía de Producto:** {registro.get('Garantia_Producto_Anios', 'N/A')}")
+
+        st.markdown("#### 📋 Análisis de Brecha y Requerimientos Críticos (Plazos y Entregas)")
+        st.info(f"**Análisis Técnico y Comercial:** {registro.get('Analisis_Brecha_Tecnica', 'Sin observaciones')}")
+        
+        if 'Plazo_Entrega_Bodega' in registro:
+            st.success(f"**Hito Clave / Plazo Crítico:** Disponibilidad en bodega / Hitos: {registro.get('Plazo_Entrega_Bodega', 'N/A')}")
 
 with tab2:
-    st.subheader("Análisis de Competencia y Marcas Adjudicadas")
-    st.markdown("Identificación de marcas competidoras, montos y pautas de evaluación detectadas en actas.")
-    
-    cols_mapa = [col for col in ['CodigoExterno', 'Nombre', 'Proveedor_Adjudicado', 'Marcas_Competencia_Detectadas', 'Monto_Adjudicado_CLP', 'Pautas_Y_Puntajes_Evaluacion'] if col in df.columns]
-    st.dataframe(df[cols_mapa], use_container_width=True)
+    st.subheader("🏆 Mapa de Competencia y Adjudicadas")
+    cols_mapa = [c for c in ['CodigoExterno', 'Nombre', 'Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Estado_Cumplimiento_Signify', 'Signify_Equivalente'] if c in df_licitaciones.columns]
+    st.dataframe(df_licitaciones[cols_mapa], use_container_width=True)
 
 with tab3:
-    st.subheader("Matriz Estratégica - Portafolio Signify Chile")
-    st.markdown("Familias de referencia oficial para cruce de licitaciones:")
-    
+    st.subheader("💡 Portafolio Oficial Signify Chile")
+    st.markdown("Líneas de productos y soluciones integrales integradas para cruce automático con licitaciones:")
     portafolio_df = pd.DataFrame({
-        "Familia_Signify": ["RoadFlair", "Xceed Pro", "Tango Pro", "ActiStar", "Arena X", "GreenVision Solar"],
-        "Aplicacion": ["Vial Alta Eficiencia", "Vial / Autopistas", "Arquitectónica / Proyectores", "Industrial / General", "Estadios y Canchas Deportivas", "Solar Fotovoltaica Autónoma"],
-        "Estrategia_Chile": [
-            "Liderazgo en vías urbanas e interurbanas", 
-            "Alto flujo lumínico y robustez vial", 
-            "Control estricto DS1 y diseño de fachadas", 
-            "Versatilidad e industrial general", 
-            "Máximo rendimiento para recintos deportivos", 
-            "Sostenibilidad sin red eléctrica"
-        ]
+        "Familia_Signify": ["RoadFlair + Interact City", "Arena X + Interact Sports", "Tango Pro + Dynalite", "Color Kinetics", "GreenVision Solar"],
+        "Aplicacion": ["Vial Inteligente y Telegestión", "Estadios y Recintos Deportivos", "Arquitectónica y Control Dinámico", "Fachadas y Iluminación Monumental", "Autónoma Fotovoltaica"],
+        "Estrategia_Chile": ["Liderazgo en smart cities y control centralizado", "Máximo rendimiento y conectividad deportiva", "Control avanzado de escenas y tonos", "Cumplimiento estricto DS1 y diseño", "Sostenibilidad sin red eléctrica"]
     })
-    st.table(portafolio_df)
+    st.dataframe(portafolio_df, use_container_width=True)
