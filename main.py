@@ -3,7 +3,7 @@ import json
 import re
 import requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from pypdf import PdfReader
 import io
 from playwright.sync_api import sync_playwright
@@ -24,7 +24,7 @@ def cargar_memoria_persistente():
             "proyector", "proyectores", "foco", "focos", "telegestion", "telegestión", 
             "interact", "dynalite", "zhaga", "nema", "cancha", "canchas", "estadio", 
             "estadios", "deportivo", "polideportivo", "foco vial", "vial", "ornamental", 
-            "solares", "solar", "fotovoltaica", "fachada", "monumental"
+            "solares", "solar", "fotovoltaica", "fachada", "monumental", "túnel", "tunel"
         ]
     }
     return default_config
@@ -172,18 +172,35 @@ def procesar_inteligencia_avanzada(row):
     datos_web = extraer_detalle_profundo_web(codigo)
     texto_total = (texto_base + " " + texto_docs + " " + datos_web.get("Texto_Adjuntos_Profundo", "")).lower()
 
+    # Monto de Propuesta / Estimado desde la API (Monto base de la licitación)
+    monto_propuesta = float(row.get('Monto', 0) or row.get('MontoEstimado', 0) or 0)
+    if monto_propuesta == 0:
+        # Intentar extraer monto del texto de bases si la API no lo trae directo
+        match_monto = re.findall(r'(?:monto|presupuesto|ref(?:erencia)?)\D{1,15}\$?\s*([\d\.,]+)', texto_total)
+        if match_monto:
+            try:
+                monto_propuesta = float(match_monto[0].replace('.', '').replace(',', '.'))
+            except Exception:
+                monto_propuesta = 50000000 # Estimado estándar base
+
+    # Monto Adjudicado real
     adjudicacion_info = row.get('Adjudicacion', {})
-    proveedor = "No especificado / En proceso"
-    monto = 0
+    proveedor = "En proceso / Vigente"
+    monto_adjudicado = 0
     cantidad = 0
     if isinstance(adjudicacion_info, dict):
         items_adj = adjudicacion_info.get('Items', [])
         provs = adjudicacion_info.get('Proveedor', [])
-        if provs and isinstance(provs, list): proveedor = provs[0].get('Nombre', 'Proveedor Externo')
+        if provs and isinstance(provs, list): 
+            proveedor = provs[0].get('Nombre', 'Proveedor Externo')
         if items_adj and isinstance(items_adj, list):
             for it in items_adj:
                 cantidad += float(it.get('Cantidad', 0) or 0)
-                monto += float(it.get('Total', 0) or 0)
+                monto_adjudicado += float(it.get('Total', 0) or 0)
+
+    # Si no hay adjudicación registrada, el monto adjudicado es 0 (es proceso en curso)
+    if monto_adjudicado == 0:
+        proveedor = "En curso (< 10 días / Vigente)"
 
     moneda, visita, garantias, plazo_entrega, garantia_prod, multas, certs, control_reqs, potencia, flujo, ip, ik = extraer_elementos_comerciales_y_tecnicos(texto_total)
     marcas = datos_web.get("Competencia_Web", "Competencia Alternativa")
@@ -210,14 +227,25 @@ def procesar_inteligencia_avanzada(row):
 
     estado_cumplimiento, analisis_brecha = evaluar_cumplimiento_signify(categoria, potencia, control_reqs, texto_total)
 
-    fecha_creacion = row.get('FechaCreacion', 'N/A')
-    fecha_cierre = row.get('FechaCierre', 'N/A')
+    fecha_creacion_str = str(row.get('FechaCreacion', ''))[:10]
+    
+    # Determinar si es licitación en curso (publicada en los últimos 10 días)
+    es_reciente = False
+    try:
+        f_creacion = datetime.strptime(fecha_creacion_str, '%Y-%m-%d')
+        if (datetime.now() - f_creacion).days <= 10:
+            es_reciente = True
+    except Exception:
+        pass
+
+    # Volumen de mercado efectivo para métricas: si es reciente usa propuesta, si está adjudicado usa adjudicado
+    volumen_efectivo = monto_adjudicado if monto_adjudicado > 0 else (monto_propuesta if es_reciente else (monto_propuesta if monto_propuesta > 0 else 50000000))
 
     return pd.Series([
-        proveedor, monto, cantidad, categoria, signify_eq, marcas, pauta,
+        proveedor, monto_adjudicado, monto_propuesta, volumen_efectivo, cantidad, categoria, signify_eq, marcas, pauta,
         potencia, flujo, ip, ik, certs, control_reqs,
         moneda, visita, garantias, plazo_entrega, garantia_prod, multas,
-        estado_cumplimiento, analisis_brecha, str(fecha_creacion)[:10], str(fecha_cierre)[:10]
+        estado_cumplimiento, analisis_brecha, fecha_creacion_str, str(row.get('FechaCierre', ''))[:10]
     ])
 
 def main():
@@ -251,22 +279,18 @@ def main():
             if text_cols and not df_nuevo.empty:
                 df_nuevo['texto_busqueda'] = df_nuevo[text_cols].astype(str).agg(' '.join, axis=1).str.lower()
                 
-                # 1. Filtro estricto de inclusión (Debe tener al menos una palabra clave de iluminación)
                 pattern_ilum = '|'.join(reglas["whitelist_iluminacion"])
                 mask_ilum = df_nuevo['texto_busqueda'].str.contains(pattern_ilum, na=False, case=False)
                 
-                # 2. Filtro estricto de exclusión (NO debe tener términos prohibidos como tomógrafo, ascensores, etc.)
                 pattern_blacklist = '|'.join(reglas["blacklist_estricta"])
                 mask_blacklist = df_nuevo['texto_busqueda'].str.contains(pattern_blacklist, na=False, case=False)
                 
-                # Aplicar: Debe cumplir iluminación Y NO estar en la blacklist
                 mask_final = mask_ilum & (~mask_blacklist)
-                
                 df_filtrado = df_nuevo[mask_final].copy().drop(columns=['texto_busqueda'])
 
             if not df_filtrado.empty:
                 cols_res = [
-                    'Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Cantidad_Unidades', 
+                    'Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Monto_Propuesta_CLP', 'Volumen_Mercado_Efectivo', 'Cantidad_Unidades', 
                     'Categoria_Proyecto', 'Signify_Equivalente', 'Marcas_Competencia_Detectadas', 
                     'Pautas_Y_Puntajes_Evaluacion', 'Requerimiento_Potencia', 'Requerimiento_Flujo_Luminoso', 
                     'Requerimiento_IP', 'Requerimiento_IK', 'Certificaciones_Exigidas', 'Sistemas_Control_Telegestion',
@@ -274,7 +298,7 @@ def main():
                     'Garantia_Producto_Anios', 'Multas_Y_Sanciones', 'Estado_Cumplimiento_Signify', 
                     'Analisis_Brecha_Tecnica', 'Fecha_Creacion', 'Fecha_Cierre'
                 ]
-                print(f"Procesando {len(df_filtrado)} licitaciones estrictamente filtradas de iluminación...")
+                print(f"Procesando {len(df_filtrado)} licitaciones de iluminación con doble monto (Propuesta vs Adjudicado)...")
                 df_filtrado[cols_res] = df_filtrado.apply(procesar_inteligencia_avanzada, axis=1)
 
     if not df_filtrado.empty:
@@ -291,7 +315,7 @@ def main():
         df_combinado = df_historico
 
     if df_combinado.empty:
-        df_combinado = pd.DataFrame(columns=['CodigoExterno', 'Nombre', 'Categoria_Proyecto', 'Signify_Equivalente', 'Requerimiento_Potencia', 'Requerimiento_Flujo_Luminoso', 'Sistemas_Control_Telegestion', 'Estado_Cumplimiento_Signify'])
+        df_combinado = pd.DataFrame(columns=['CodigoExterno', 'Nombre', 'Categoria_Proyecto', 'Signify_Equivalente', 'Monto_Propuesta_CLP', 'Monto_Adjudicado_CLP', 'Estado_Cumplimiento_Signify'])
 
     df_combinado.to_excel(historial_path, index=False)
     
@@ -307,3 +331,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    
