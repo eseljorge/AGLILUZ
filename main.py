@@ -35,9 +35,7 @@ def cargar_memoria_persistente():
         try:
             with open(MEMORY_PATH, 'r', encoding='utf-8') as f:
                 contenido = f.read().lower()
-                # Aquí el agente puede interpretar notas o secciones agregadas en memory.md
                 if "blacklist:" in contenido or "exclusiones" in contenido:
-                    # El agente mantiene su base y suma flexibilidad
                     pass
         except Exception:
             pass
@@ -266,12 +264,29 @@ def main():
                 print("Iniciando extracción profunda con Playwright y análisis de Telegestión...")
                 df_filtrado[cols_resultado] = df_filtrado.apply(procesar_inteligencia_avanzada, axis=1)
 
+    # LIMPIEZA AUTOMÁTICA DE DATOS DE EJEMPLO
     if not df_filtrado.empty:
-        if not df_historico.empty and 'CodigoExterno' in df_historico.columns and 'CodigoExterno' in df_filtrado.columns:
-            df_combinado = pd.concat([df_historico, df_filtrado]).drop_duplicates(subset=['CodigoExterno'], keep='first')
+        if not df_historico.empty:
+            cols_check = [c for c in ['Nombre', 'CodigoExterno'] if c in df_historico.columns]
+            if cols_check:
+                mask_ejemplo = False
+                for c in cols_check:
+                    mask_ejemplo = mask_ejemplo | df_historico[c].astype(str).str.contains('Ejemplo|ejemplo|\[Ejemplo\]', na=False, regex=True)
+                df_historico = df_historico[~mask_ejemplo]
+            
+            # Combinar datos nuevos (prioridad) con históricos limpios
+            df_combinado = pd.concat([df_filtrado, df_historico]).drop_duplicates(subset=['CodigoExterno'], keep='first')
         else:
             df_combinado = df_filtrado
     else:
+        # Si no hubo filtrado nuevo, al menos limpiamos el histórico
+        if not df_historico.empty:
+            cols_check = [c for c in ['Nombre', 'CodigoExterno'] if c in df_historico.columns]
+            if cols_check:
+                mask_ejemplo = False
+                for c in cols_check:
+                    mask_ejemplo = mask_ejemplo | df_historico[c].astype(str).str.contains('Ejemplo|ejemplo|\[Ejemplo\]', na=False, regex=True)
+                df_historico = df_historico[~mask_ejemplo]
         df_combinado = df_historico
 
     if df_combinado.empty:
