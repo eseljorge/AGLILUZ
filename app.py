@@ -3,13 +3,71 @@ import pandas as pd
 import os
 
 st.set_page_config(
-    page_title="AgliLuz: Inteligencia y Análisis de Licitaciones",
+    page_title="AgliLuz | Enterprise Intelligence & Tender Analytics",
     page_icon="💡",
     layout="wide"
 )
 
-st.markdown("# 💡 AgliLuz: Plataforma Online de Inteligencia y Análisis de Licitaciones")
-st.markdown("Sistema autónomo de análisis técnico profundo, bases comerciales y mapeo de competencia para **Signify Chile**.")
+# Estilo visual ejecutivo, corporativo y de alta tecnología (Tech/Enterprise)
+st.markdown("""
+    <style>
+    /* Fondo general y tipografía */
+    .main {
+        background-color: #f8fafc;
+        color: #1e293b;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    
+    /* Encabezado Principal Ejecutivo */
+    .executive-header {
+        background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
+        padding: 2.5rem 2rem;
+        border-radius: 12px;
+        color: #ffffff;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+    .executive-header h1 {
+        color: #ffffff;
+        font-size: 2.2rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+    .executive-header p {
+        color: #93c5fd;
+        font-size: 1.1rem;
+        margin-bottom: 0;
+    }
+
+    /* Tarjetas de Métricas Ejecutivas */
+    .metric-card {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        padding: 1.25rem;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+        border-left: 4px solid #2563eb;
+    }
+    
+    /* Contenedores de Ficha Detallada */
+    .tech-card {
+        background-color: #ffffff;
+        border: 1px solid #cbd5e1;
+        padding: 1.5rem;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        margin-top: 1rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# Banner Ejecutivo
+st.markdown("""
+    <div class="executive-header">
+        <h1>💡 AgliLuz Enterprise Intelligence</h1>
+        <p>Plataforma Autónoma de Análisis Técnico, Bases Comerciales y Mapeo de Competencia | Signify Chile</p>
+    </div>
+""", unsafe_allow_html=True)
 
 HISTORIAL_PATH = 'agliluz/historial_licitaciones.xlsx'
 
@@ -24,7 +82,7 @@ def cargar_datos():
         except Exception:
             pass
     
-    # Datos de demostración completos con estructura técnica y comercial detallada
+    # Datos de demostración estructurados con formato ejecutivo
     data_demo = pd.DataFrame({
         'CodigoExterno': ['TÚNEL-LO-RUIZ-2026', '858-190-LR25', '4483-17-LR26'],
         'Nombre': ['[Ejemplo] Túnel Lo Ruiz - Alumbrado y Control Telensa', '[Ejemplo] Mejoramiento Iluminación Estadio Municipal', '[Ejemplo] Suministro de Proyectores Deportivos IND'],
@@ -55,86 +113,86 @@ def cargar_datos():
 df_licitaciones, es_demo = cargar_datos()
 
 if es_demo:
-    st.info("ℹ️ **Modo Demostración Activo:** Estás viendo datos estructurados completos. Ejecuta tu flujo en GitHub Actions para sincronizar procesos reales.")
+    st.info("ℹ️ **Modo Demostración Activo:** Estás viendo datos estructurados corporativos. Ejecuta tu flujo en GitHub Actions para sincronizar procesos reales del portal.")
 
-# Métricas Principales
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("Total Procesos Analizados", len(df_licitaciones))
-with col2:
-    st.metric("Procesos Filtrados Activos", len(df_licitaciones))
-with col3:
-    volumen_total = df_licitaciones['Monto_Adjudicado_CLP'].sum() if 'Monto_Adjudicado_CLP' in df_licitaciones.columns else 0
-    st.metric("Volumen Mercado (CLP)", f"${volumen_total:,.0f}")
-with col4:
-    st.metric("Alta Compatibilidad Signify", len(df_licitaciones))
+# Panel de Métricas Ejecutivas
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    st.metric("Procesos Totales", len(df_licitaciones))
+with c2:
+    st.metric("Procesos Filtrados", len(df_licitaciones))
+with c3:
+    volumen = df_licitaciones['Monto_Adjudicado_CLP'].sum() if 'Monto_Adjudicado_CLP' in df_licitaciones.columns else 0
+    st.metric("Volumen Mercado", f"${volumen:,.0f} CLP")
+with c4:
+    st.metric("Fit Signify High-Tech", f"{len(df_licitaciones)} Activos")
 
-st.markdown("---")
+st.markdown("<br>", unsafe_allow_html=True)
 
-# 3 Pestañas de Dashboards
-tab1, tab2, tab3 = st.tabs(["📊 Dashboard de Licitaciones", "🏆 Mapa de Competencia y Adjudicadas", "💡 Portafolio Signify Chile"])
+# Navegación por pestañas ejecutivas
+tab1, tab2, tab3 = st.tabs(["📊 Dashboard Ejecutivo de Licitaciones", "🏆 Mapa de Competencia y Adjudicadas", "💡 Portafolio Tecnológico Signify"])
 
 with tab1:
-    st.subheader("Listado Detallado y Requerimientos Técnicos Extraídos")
-    st.markdown("Extracción exhaustiva de elementos técnicos (potencia, flujo, IP, IK, telegestión) y estado de cumplimiento por proyecto:")
+    st.subheader("Listado Estratégico y Parámetros Técnicos Clave")
+    st.markdown("Filtro y visión general de proyectos de iluminación profesional, vial, deportiva y telegestión detectados:")
     
-    # Tabla resumen con todos los requerimientos técnicos clave visibles
     cols_t1 = [c for c in ['CodigoExterno', 'Nombre', 'Categoria_Proyecto', 'Signify_Equivalente', 'Requerimiento_Potencia', 'Requerimiento_Flujo_Luminoso', 'Sistemas_Control_Telegestion', 'Estado_Cumplimiento_Signify'] if c in df_licitaciones.columns]
     st.dataframe(df_licitaciones[cols_t1], use_container_width=True)
     
     st.markdown("---")
-    st.subheader("🔍 Ficha de Detalle Técnico y Comercial por Licitación")
-    st.markdown("Selecciona un Código Externo para desplegar la ficha completa con plazos, monedas, garantías, multas y análisis de brecha:")
+    st.subheader("🔍 Ficha de Auditoría Técnica y Comercial por Proyecto")
+    st.markdown("Seleccione un código externo para desplegar la ficha de análisis profundo con plazos, condiciones comerciales y normativas:")
     
     if not df_licitaciones.empty:
         codigos = df_licitaciones['CodigoExterno'].tolist()
-        sel_codigo = st.selectbox("Seleccione un Código Externo:", codigos, key="sel_codigo_detalle")
+        sel_codigo = st.selectbox("Seleccione Código de Licitación:", codigos, key="sel_codigo_exec")
         
         reg = df_licitaciones[df_licitaciones['CodigoExterno'] == sel_codigo].iloc[0]
         
-        st.markdown(f"### 📄 {reg.get('Nombre', 'Sin Nombre')}")
+        st.markdown(f"### 🏢 Ficha de Proyecto: {reg.get('Nombre', 'Sin Nombre')}")
         
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.markdown("#### 📋 Información Comercial y Plazos")
-            st.markdown(f"**ID / Código Externo:** `{reg.get('CodigoExterno', 'N/A')}`")
+        col_left, col_right = st.columns(2)
+        with col_left:
+            st.markdown("#### 📋 Condiciones Comerciales y Contractuales")
+            st.markdown(f"**Código Externo:** `{reg.get('CodigoExterno', 'N/A')}`")
             st.markdown(f"**Categoría:** {reg.get('Categoria_Proyecto', 'N/A')}")
             st.markdown(f"**Proveedor Adjudicado:** {reg.get('Proveedor_Adjudicado', 'N/A')}")
-            st.markdown(f"**Monto Adjudicado:** ${reg.get('Monto_Adjudicado_CLP', 0):,.0f} CLP")
+            st.markdown(f"**Monto Estimado / Adjudicado:** ${reg.get('Monto_Adjudicado_CLP', 0):,.0f} CLP")
             st.markdown(f"**Moneda de Oferta:** {reg.get('Moneda_Oferta', 'N/A')}")
             st.markdown(f"**Fechas (Creación / Cierre):** {reg.get('Fecha_Creacion', 'N/A')} al {reg.get('Fecha_Cierre', 'N/A')}")
             st.markdown(f"**Visita a Terreno:** {reg.get('Visita_Terreno', 'N/A')}")
-            st.markdown(f"**Plazo de Entrega en Bodega:** {reg.get('Plazo_Entrega_Bodega', 'N/A')}")
+            st.markdown(f"**Plazo Entrega Bodega:** {reg.get('Plazo_Entrega_Bodega', 'N/A')}")
             st.markdown(f"**Garantías Requeridas:** {reg.get('Garantias_Requeridas', 'N/A')}")
-            st.markdown(f"**Multas y Sanciones:** {reg.get('Multas_Y_Sanciones', 'N/A')}")
+            st.markdown(f"**Multas / Sanciones:** {reg.get('Multas_Y_Sanciones', 'N/A')}")
             st.markdown(f"**Garantía de Producto:** {reg.get('Garantia_Producto_Anios', 'N/A')}")
             
-        with col_b:
-            st.markdown("#### ⚙️ Requerimientos Técnicos y Control")
-            st.markdown(f"**Equivalente Signify:** `{reg.get('Signify_Equivalente', 'N/A')}`")
+        with col_right:
+            st.markdown("#### ⚡ Especificaciones Técnicas y IoT")
+            st.markdown(f"**Solución Signify Equivalente:** `{reg.get('Signify_Equivalente', 'N/A')}`")
             st.markdown(f"**Estado de Cumplimiento:** **{reg.get('Estado_Cumplimiento_Signify', 'N/A')}**")
             st.markdown(f"**Potencia Requerida:** `{reg.get('Requerimiento_Potencia', 'N/A')}`")
             st.markdown(f"**Flujo Lumínico:** `{reg.get('Requerimiento_Flujo_Luminoso', 'N/A')}`")
             st.markdown(f"**Protección IP:** `{reg.get('Requerimiento_IP', 'N/A')}`")
             st.markdown(f"**Resistencia IK:** `{reg.get('Requerimiento_IK', 'N/A')}`")
-            st.markdown(f"**Certificaciones / Normas:** {reg.get('Certificaciones_Exigidas', 'N/A')}")
-            st.markdown(f"**Sistemas de Control / Telegestión:** {reg.get('Sistemas_Control_Telegestion', 'N/A')}")
+            st.markdown(f"**Normas / Certificaciones:** {reg.get('Certificaciones_Exigidas', 'N/A')}")
+            st.markdown(f"**Control / Telegestión:** {reg.get('Sistemas_Control_Telegestion', 'N/A')}")
 
-        st.markdown("#### 📊 Análisis Técnico de Brecha y Cumplimiento Signify")
-        st.success(reg.get('Analisis_Brecha_Tecnica', 'Sin análisis registrado'))
+        st.markdown("#### 📈 Informe de Brecha Tecnológica y Oportunidad Comercial")
+        st.info(reg.get('Analisis_Brecha_Tecnica', 'Sin análisis registrado'))
 
 with tab2:
     st.subheader("🏆 Mapa de Competencia y Adjudicadas")
-    st.markdown("Cruzando proveedores adjudicados, montos de mercado y estados de cumplimiento técnico:")
+    st.markdown("Análisis estratégico de posicionamiento frente a competidores en licitaciones del sector público:")
     cols_t2 = [c for c in ['CodigoExterno', 'Nombre', 'Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Estado_Cumplimiento_Signify', 'Signify_Equivalente', 'Marcas_Competencia_Detectadas'] if c in df_licitaciones.columns]
     st.dataframe(df_licitaciones[cols_t2], use_container_width=True)
 
 with tab3:
-    st.subheader("💡 Portafolio Profesional Signify Chile")
-    st.markdown("Líneas de productos y soluciones integrales de referencia en `signify.com/es-cl/prof`:")
+    st.subheader("💡 Portafolio Tecnológico Profesional Signify Chile")
+    st.markdown("Líneas de infraestructura inteligente de referencia corporativa en `signify.com/es-cl/prof`:")
     portafolio_df = pd.DataFrame({
         "Familia_Signify": ["RoadFlair + Interact City", "Arena X + Interact Sports", "Tango Pro + Dynalite", "Color Kinetics", "GreenVision Solar"],
-        "Aplicacion": ["Vial Inteligente y Túneles", "Estadios y Polideportivos IND", "Arquitectónica y Control Dinámico", "Fachadas Monumentales", "Fotovoltaica Autónoma"],
-        "Estrategia_Chile": ["Smart cities, zócalos Zhaga/NEMA y telegestión centralizada", "Máximo rendimiento, alta potencia y cumplimiento DS1", "Control avanzado de escenas y gestión DALI/DMX", "Diseño y cumplimiento estricto norma lumínica", "Autonomía completa fuera de red"]
+        "Aplicacion": ["Vial Pública e Inteligente / Túneles", "Estadios, Canchas y Polideportivos", "Ornamental y Arquitectónica Avanzada", "Fachadas Monumentales", "Iluminación Solar Autónoma"],
+        "Estrategia_Tecnologica": ["Smart cities, zócalos Zhaga/NEMA y telegestión centralizada IoT", "Alto rendimiento lumínico, control DMX y cumplimiento IND", "Control dinámico de escenas DALI/DMX y tonos", "Diseño lumínico de precisión con norma DS1 estricta", "Autonomía energética total sin conexión a red eléctrica"]
     })
     st.dataframe(portafolio_df, use_container_width=True)
+    
