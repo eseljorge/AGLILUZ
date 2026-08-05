@@ -1,8 +1,8 @@
-requests
-pandas
-pypdf
-openpyxl
-streamlit
-playwright
-beautifulsoup4
-PyYAML
+streamlit==1.38.0
+starlette==0.37.2
+pandas==2.2.1
+openpyxl==3.1.2
+PyYAML==6.0.1
+requests==2.31.0
+playwright==1.42.0
+pypdf==4.1.0
