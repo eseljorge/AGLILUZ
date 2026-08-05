@@ -8,52 +8,51 @@ import io
 
 def extraer_texto_desde_url(url):
     try:
-        response = requests.get(url, timeout=20)
+        response = requests.get(url, timeout=15)
         if response.status_code == 200 and ('pdf' in response.headers.get('content-type', '').lower() or 'pdf' in url.lower()):
             with io.BytesIO(response.content) as f:
                 reader = PdfReader(f)
                 texto = ""
-                for page in reader.pages[:30]:
+                for page in reader.pages[:20]:
                     texto += page.extract_text() or ""
             return texto.lower()
     except Exception:
         pass
     return ""
 
-def analizar_y_extraer_tecnico_y_comercial(texto_total):
+def extraer_parametros_tecnicos(texto_total):
     texto = texto_total.lower()
 
-    # --- 1. EXTRACCIÓN DE CANTIDAD DE LUMINARIAS ---
+    # Cantidad de luminarias
     cantidad_unidades = 0
-    matches_cant = re.findall(r'(?:cantidad|adquisicion de|total|requiere)\D{1,15}(\d+)\s*(?:luminarias|focos|proyectores|unidades|postes)', texto)
+    matches_cant = re.findall(r'(?:cantidad|adquisicion de|total|requiere|suministro)\D{1,15}(\d+)\s*(?:luminarias|focos|proyectores|unidades|postes)', texto)
     if matches_cant:
-        nums = [int(n) for n in matches_cant if int(n) < 10000]
+        nums = [int(n) for n in matches_cant if int(n) < 15000]
         if nums: cantidad_unidades = max(nums)
     if cantidad_unidades == 0:
-        # Búsqueda general de números seguidos de luminarias
-        matches_ gen = re.findall(r'(\d+)\s*(?:luminarias|focos led|proyectores led)', texto)
+        matches_gen = re.findall(r'(\d+)\s*(?:luminarias|focos led|proyectores led)', texto)
         if matches_gen:
-            nums_gen = [int(n) for n in matches_gen if int(n) < 10000]
+            nums_gen = [int(n) for n in matches_gen if int(n) < 15000]
             if nums_gen: cantidad_unidades = max(nums_gen)
 
-    # --- 2. EXTRACCIÓN DE POTENCIA (W) ---
+    # Potencia (W)
     potencias = re.findall(r'(\d+[\.,]?\d*)\s*(?:w|watt|watts)', texto)
     pot_nums = [float(p.replace(',', '.')) for p in potencias if float(p.replace(',', '.')) < 2000]
     potencia_str = f"{min(pot_nums)}W - {max(pot_nums)}W" if pot_nums else "No especificado en bases"
 
-    # --- 3. EXTRACCIÓN DE FLUJO LUMINOSO (lm) ---
+    # Flujo Luminoso (lm)
     flujos = re.findall(r'(\d+[\.,]?\d*)\s*(?:lm|lumenes|lúmenes)', texto)
     flujo_nums = [float(f.replace(',', '.')) for f in flujos if float(f.replace(',', '.')) > 500]
     flujo_str = f"{min(flujo_nums):,.0f} lm - {max(flujo_nums):,.0f} lm" if flujo_nums else "No especificado en bases"
 
-    # --- 4. IP e IK ---
+    # IP e IK
     ip_match = re.findall(r'ip\s*([0-6][5678])', texto)
     ip_str = "IP" + max(ip_match) if ip_match else "IP66 Requerido"
 
     ik_match = re.findall(r'ik\s*([0-1][0-9])', texto)
     ik_str = "IK" + max(ik_match) if ik_match else "IK08 Requerido"
 
-    # --- 5. CONTROL Y TELEGESTIÓN ---
+    # Control y Telegestión
     control = []
     if 'telegestion' in texto or 'telegestión' in texto: control.append("Telegestión")
     if 'zhaga' in texto: control.append("Zócalo Zhaga")
@@ -62,7 +61,7 @@ def analizar_y_extraer_tecnico_y_comercial(texto_total):
     if 'dynalite' in texto: control.append("Dynalite")
     control_str = " | ".join(control) if control else "Control estándar / Autónomo"
 
-    # --- 6. CERTIFICACIONES Y NORMATIVA ---
+    # Certificaciones
     certs = []
     if 'sec' in texto: certs.append("SEC")
     if 'ds1' in texto or 'decreto supremo' in texto or 'norma lumínica' in texto: certs.append("Decreto Supremo N°1 (DS1)")
@@ -70,17 +69,16 @@ def analizar_y_extraer_tecnico_y_comercial(texto_total):
 
     return cantidad_unidades, potencia_str, flujo_str, ip_str, ik_str, control_str, cert_str
 
-def calcular_scoring_estricto(texto):
+def evaluar_licitacion(texto):
     score = 0
     detalles = []
 
-    # Whitelist de iluminación (Suma fuerte)
     tokens_luz = [
-        ("luminaria", 30), ("luminarias", 30), ("alumbrado", 25), 
-        ("iluminacion", 25), ("iluminación", 25), ("proyector", 25), 
-        ("proyectores", 25), ("foco vial", 20), ("telegestión", 20), 
-        ("telegestion", 20), ("cancha", 15), ("estadio", 15), 
-        ("vial", 15), ("solar", 15), ("ornamental", 10), ("túnel", 15)
+        ("luminaria", 35), ("luminarias", 35), ("alumbrado", 30), 
+        ("iluminacion", 30), ("iluminación", 30), ("proyector", 25), 
+        ("proyectores", 25), ("foco vial", 20), ("telegestión", 25), 
+        ("telegestion", 25), ("cancha", 20), ("estadio", 20), 
+        ("vial", 15), ("solar", 20), ("ornamental", 15), ("túnel", 20), ("tunel", 20)
     ]
     
     tiene_token_troncal = False
@@ -91,20 +89,17 @@ def calcular_scoring_estricto(texto):
             if palabra in ["luminaria", "luminarias", "alumbrado", "iluminacion", "iluminación", "proyector", "proyectores"]:
                 tiene_token_troncal = True
 
-    # Blacklist estricta (Resta drásticamente para eliminar tomógrafos, ascensores, etc.)
     tokens_basura = [
-        ("tomografo", 100), ("tomógrafo", 100), ("ascensor", 100), 
-        ("ascensores", 100), ("caldera", 80), ("cesfam", 50), 
-        ("hospital", 40), ("mampara", 50), ("dental", 80)
+        ("tomografo", 120), ("tomógrafo", 120), ("ascensor", 120), 
+        ("ascensores", 120), ("caldera", 100), ("cesfam", 80), 
+        ("hospital", 60), ("mampara", 80), ("dental", 100), ("vehiculo", 80)
     ]
     for palabra, penalizacion in tokens_basura:
         if palabra in texto:
             score -= penalizacion
             detalles.append(f"-{penalizacion} [BLACKLIST: {palabra}]")
 
-    # Condición indispensable: Debe tener al menos un término troncal de iluminación y un score >= 30
-    es_valido = tiene_token_troncal and (score >= 30)
-
+    es_valido = tiene_token_troncal and (score >= 35)
     return es_valido, score, " | ".join(detalles)
 
 def main():
@@ -118,15 +113,14 @@ def main():
     response = requests.get(url)
     
     if response.status_code != 200:
-        print("Error al conectar con la API.")
+        print("Error al conectar con la API de Mercado Público.")
         return
 
     data = response.json()
     licitaciones = data.get('Listado', [])
-    print(f"Total licitaciones evaluadas de la API: {len(licitaciones)}")
+    print(f"Total licitaciones obtenidas: {len(licitaciones)}")
 
-    registros_validos = []
-
+    registros = []
     for item in licitaciones:
         codigo = item.get('CodigoExterno')
         nombre = item.get('Nombre', '')
@@ -134,14 +128,19 @@ def main():
         
         texto_completo = f"{nombre} {descripcion}".lower()
 
-        # Evaluación estricta de Scoring
-        es_valido, score, detalle_score = calcular_scoring_estricto(texto_completo)
+        # Descargar y leer documentos PDF adjuntos si existen en la API
+        documentos = item.get('Documentos', [])
+        if isinstance(documentos, list):
+            for doc in documentos:
+                url_doc = doc.get('UrlDocumento', '') or doc.get('URL', '')
+                if url_doc and isinstance(url_doc, str) and url_doc.startswith('http'):
+                    texto_completo += " " + extraer_texto_desde_url(url_doc)
+
+        es_valido, score, detalle_score = evaluar_licitacion(texto_completo)
 
         if es_valido:
-            # Extracción profunda de parámetros técnicos
-            cant_unidades, potencia, flujo, ip, ik, control, certs = analizar_y_extraer_tecnico_y_comercial(texto_completo)
+            cant_unidades, potencia, flujo, ip, ik, control, certs = extraer_parametros_tecnicos(texto_completo)
 
-            # Clasificación de categoría
             categoria = "Iluminación Vial / Pública"
             signify_eq = "RoadFlair / Xceed Pro + Interact City"
             if "estadio" in texto_completo or "cancha" in texto_completo or "deportivo" in texto_completo:
@@ -177,14 +176,12 @@ def main():
                 'Fecha_Creacion': str(item.get('FechaCreacion', ''))[:10],
                 'Fecha_Cierre': str(item.get('FechaCierre', ''))[:10]
             }
-            registros_validos.append(record)
+            registros.append(record)
 
-    df_final = pd.DataFrame(registros_validos)
+    df_final = pd.DataFrame(registros)
     os.makedirs('agliluz', exist_ok=True)
-    historial_path = 'agliluz/historial_licitaciones.xlsx'
-    df_final.to_excel(historial_path, index=False)
-    
-    print(f"¡Proceso completado! {len(df_final)} licitaciones puras de iluminación extraídas y guardadas.")
+    df_final.to_excel('agliluz/historial_licitaciones.xlsx', index=False)
+    print(f"Proceso finalizado con éxito. {len(df_final)} licitaciones puras de iluminación guardadas.")
 
 if __name__ == '__main__':
     main()
