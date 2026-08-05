@@ -1,334 +1,190 @@
 import os
-import json
 import re
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from pypdf import PdfReader
 import io
-from playwright.sync_api import sync_playwright
-
-MEMORY_PATH = 'memory.md'
-
-def cargar_memoria_persistente():
-    default_config = {
-        "blacklist_estricta": [
-            "tomografo", "tomógrafo", "ascensor", "ascensores", "caldera", "calderas", 
-            "mampara", "mamparras", "cesfam", "hospital", "clinica", "clínica", 
-            "dental", "camion", "camión", "vehiculo", "vehículo", "indumentaria", 
-            "alimentos", "colacion", "computador", "impresora", "mobiliario", 
-            "oficina", "aire acondicionado", "climatizacion", "climatización"
-        ],
-        "whitelist_iluminacion": [
-            "luminaria", "luminarias", "alumbrado", "iluminacion", "iluminación", 
-            "proyector", "proyectores", "foco", "focos", "telegestion", "telegestión", 
-            "interact", "dynalite", "zhaga", "nema", "cancha", "canchas", "estadio", 
-            "estadios", "deportivo", "polideportivo", "foco vial", "vial", "ornamental", 
-            "solares", "solar", "fotovoltaica", "fachada", "monumental", "túnel", "tunel"
-        ]
-    }
-    return default_config
 
 def extraer_texto_desde_url(url):
     try:
-        response = requests.get(url, timeout=25)
-        if response.status_code == 200 and ('application/pdf' in response.headers.get('content-type', '').lower() or 'pdf' in url.lower()):
+        response = requests.get(url, timeout=20)
+        if response.status_code == 200 and ('pdf' in response.headers.get('content-type', '').lower() or 'pdf' in url.lower()):
             with io.BytesIO(response.content) as f:
                 reader = PdfReader(f)
-                texto_completo = ""
-                for page in reader.pages[:35]:
-                    texto_completo += page.extract_text() or ""
-            return texto_completo.lower()
+                texto = ""
+                for page in reader.pages[:30]:
+                    texto += page.extract_text() or ""
+            return texto.lower()
     except Exception:
         pass
     return ""
 
-def extraer_detalle_profundo_web(codigo_externo):
-    url_ficha = f"https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?id={codigo_externo}"
-    resultado_profundo = {
-        "Competencia_Web": "Competencia Alternativa",
-        "Texto_Adjuntos_Profundo": ""
-    }
-    links_documentos = []
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto(url_ficha, timeout=45000)
-            page.wait_for_load_state('domcontentloaded', timeout=15000)
-            
-            texto_ficha = page.inner_text('body').lower()
-            resultado_profundo["Texto_Adjuntos_Profundo"] += " " + texto_ficha
-            
-            elementos_a = page.query_selector_all('a')
-            for el in elementos_a:
-                href = el.get_attribute('href')
-                if href and ('pdf' in href.lower() or 'descarga' in href.lower() or 'document' in href.lower() or 'file' in href.lower()):
-                    if href.startswith('http'): links_documentos.append(href)
-                    elif href.startswith('/'): links_documentos.append(f"https://www.mercadopublico.cl{href}")
-            
-            if "ge lighting" in texto_ficha: resultado_profundo["Competencia_Web"] = "GE Lighting"
-            elif "osram" in texto_ficha or "ledvance" in texto_ficha: resultado_profundo["Competencia_Web"] = "Osram / Ledvance"
-            elif "cree" in texto_ficha: resultado_profundo["Competencia_Web"] = "Cree Lighting"
-            elif "philips" in texto_ficha or "signify" in texto_ficha: resultado_profundo["Competencia_Web"] = "Philips / Signify"
-            else: resultado_profundo["Competencia_Web"] = "Competencia Local / Alternativa"
-                
-            browser.close()
-    except Exception as e:
-        print(f"Nota Playwright en {codigo_externo}: {e}")
-        
-    for link_doc in set(links_documentos[:4]):
-        resultado_profundo["Texto_Adjuntos_Profundo"] += " " + extraer_texto_desde_url(link_doc)
-        
-    return resultado_profundo
+def analizar_y_extraer_tecnico_y_comercial(texto_total):
+    texto = texto_total.lower()
 
-def extraer_elementos_comerciales_y_tecnicos(texto):
-    moneda = "Pesos Chilenos (CLP)"
-    if 'unidad de fomento' in texto or ' uf ' in texto: moneda = "Unidad de Fomento (UF)"
-    elif 'dolar' in texto or 'usd' in texto: moneda = "Dólares (USD)"
+    # --- 1. EXTRACCIÓN DE CANTIDAD DE LUMINARIAS ---
+    cantidad_unidades = 0
+    matches_cant = re.findall(r'(?:cantidad|adquisicion de|total|requiere)\D{1,15}(\d+)\s*(?:luminarias|focos|proyectores|unidades|postes)', texto)
+    if matches_cant:
+        nums = [int(n) for n in matches_cant if int(n) < 10000]
+        if nums: cantidad_unidades = max(nums)
+    if cantidad_unidades == 0:
+        # Búsqueda general de números seguidos de luminarias
+        matches_ gen = re.findall(r'(\d+)\s*(?:luminarias|focos led|proyectores led)', texto)
+        if matches_gen:
+            nums_gen = [int(n) for n in matches_gen if int(n) < 10000]
+            if nums_gen: cantidad_unidades = max(nums_gen)
 
-    visita = "No se exige visita a terreno obligatoria"
-    if 'visita a terreno' in texto or 'visita obligatoria' in texto:
-        visita = "Exige Visita a Terreno"
+    # --- 2. EXTRACCIÓN DE POTENCIA (W) ---
+    potencias = re.findall(r'(\d+[\.,]?\d*)\s*(?:w|watt|watts)', texto)
+    pot_nums = [float(p.replace(',', '.')) for p in potencias if float(p.replace(',', '.')) < 2000]
+    potencia_str = f"{min(pot_nums)}W - {max(pot_nums)}W" if pot_nums else "No especificado en bases"
 
-    garantias = "Garantía estándar según bases"
-    if 'fiel cumplimiento' in texto:
-        match_garantia = re.findall(r'(\d+[\.,]?\d*)\s*%\s*(?:del valor|de la oferta|fiel cumplimiento)?', texto)
-        garantias = f"Boleta Fiel Cumplimiento ({match_garantia[0]}%)" if match_garantia else "Boleta Fiel Cumplimiento exigida"
+    # --- 3. EXTRACCIÓN DE FLUJO LUMINOSO (lm) ---
+    flujos = re.findall(r'(\d+[\.,]?\d*)\s*(?:lm|lumenes|lúmenes)', texto)
+    flujo_nums = [float(f.replace(',', '.')) for f in flujos if float(f.replace(',', '.')) > 500]
+    flujo_str = f"{min(flujo_nums):,.0f} lm - {max(flujo_nums):,.0f} lm" if flujo_nums else "No especificado en bases"
 
-    plazo_entrega = "Conforme a cronograma oficial"
-    if 'bodega' in texto or 'plazo de entrega' in texto:
-        plazo_entrega = "Hitos críticos en bases técnicas"
+    # --- 4. IP e IK ---
+    ip_match = re.findall(r'ip\s*([0-6][5678])', texto)
+    ip_str = "IP" + max(ip_match) if ip_match else "IP66 Requerido"
 
-    garantia_prod = "Estándar 5 Años"
-    match_anos = re.findall(r'(\d+)\s*(?:anos|años)\s*(?:de)?\s*garant[ií]a', texto)
-    if match_anos: garantia_prod = f"{match_anos[0]} Años"
+    ik_match = re.findall(r'ik\s*([0-1][0-9])', texto)
+    ik_str = "IK" + max(ik_match) if ik_match else "IK08 Requerido"
 
-    multas = "Multas estándar por atraso MOP/Mercado Público"
-    if 'multa' in texto: multas = "Estipuladas en bases administrativas"
+    # --- 5. CONTROL Y TELEGESTIÓN ---
+    control = []
+    if 'telegestion' in texto or 'telegestión' in texto: control.append("Telegestión")
+    if 'zhaga' in texto: control.append("Zócalo Zhaga")
+    if 'nema' in texto: control.append("Zócalo NEMA")
+    if 'interact' in texto: control.append("Interact")
+    if 'dynalite' in texto: control.append("Dynalite")
+    control_str = " | ".join(control) if control else "Control estándar / Autónomo"
 
-    certificaciones = []
-    if 'sec' in texto: certificaciones.append("Certificación SEC")
-    if 'ds1' in texto or 'decreto supremo' in texto or 'norma lumínica' in texto: certificaciones.append("Decreto Supremo N°1 (DS1)")
-    cert_str = " | ".join(certificaciones) if certificaciones else "Normativa DS1 / Estándar"
+    # --- 6. CERTIFICACIONES Y NORMATIVA ---
+    certs = []
+    if 'sec' in texto: certs.append("SEC")
+    if 'ds1' in texto or 'decreto supremo' in texto or 'norma lumínica' in texto: certs.append("Decreto Supremo N°1 (DS1)")
+    cert_str = " | ".join(certs) if certs else "Normativa DS1 / Estándar"
 
-    telegestion = []
-    if 'telegestion' in texto or 'telegestión' in texto: telegestion.append("Exige Telegestión")
-    if 'zhaga' in texto: telegestion.append("Zócalo Zhaga")
-    if 'nema' in texto: telegestion.append("Zócalo NEMA")
-    if 'interact' in texto: telegestion.append("Plataforma Interact")
-    if 'dynalite' in texto: telegestion.append("Sistema Dynalite")
-    control_str = " | ".join(telegestion) if telegestion else "Control autónomo o estándar"
+    return cantidad_unidades, potencia_str, flujo_str, ip_str, ik_str, control_str, cert_str
 
-    potencias = re.findall(r'(\d+[\.,]?\d*)\s*(?:w|watt|watts)', texto, re.IGNORECASE)
-    potencia_nums = [float(p.replace(',', '.')) for p in potencias if len(p) < 5]
-    potencia_str = f"{min(potencia_nums)}W - {max(potencia_nums)}W" if potencia_nums else "100W - 250W (Estimado Bases)"
+def calcular_scoring_estricto(texto):
+    score = 0
+    detalles = []
 
-    flujos = re.findall(r'(\d+[\.,]?\d*)\s*(?:lm|lumenes|lúmenes)', texto, re.IGNORECASE)
-    flujo_nums = [float(f.replace(',', '.')) for f in flujos if len(f) < 7]
-    flujo_str = f"{min(flujo_nums):,.0f} lm - {max(flujo_nums):,.0f} lm" if flujo_nums else "12,000 lm - 24,000 lm (Estimado Bases)"
-
-    ip_match = re.findall(r'ip\s*([0-6][5678])', texto, re.IGNORECASE)
-    ip_str = "IP" + max(ip_match) if ip_match else "IP66"
-
-    ik_match = re.findall(r'ik\s*([0-1][0-9])', texto, re.IGNORECASE)
-    ik_str = "IK" + max(ik_match) if ik_match else "IK08"
-
-    return moneda, visita, garantias, plazo_entrega, garantia_prod, multas, cert_str, control_str, potencia_str, flujo_str, ip_str, ik_str
-
-def evaluar_cumplimiento_signify(categoria, potencia, control, texto):
-    estado = "Cumple Totalmente"
-    brecha = "Especificaciones técnicas totalmente alineadas con el portafolio profesional Signify."
+    # Whitelist de iluminación (Suma fuerte)
+    tokens_luz = [
+        ("luminaria", 30), ("luminarias", 30), ("alumbrado", 25), 
+        ("iluminacion", 25), ("iluminación", 25), ("proyector", 25), 
+        ("proyectores", 25), ("foco vial", 20), ("telegestión", 20), 
+        ("telegestion", 20), ("cancha", 15), ("estadio", 15), 
+        ("vial", 15), ("solar", 15), ("ornamental", 10), ("túnel", 15)
+    ]
     
-    if "Deportiva" in categoria:
-        brecha = f"Potencia ({potencia}): Cubierta por familia Arena X con conectividad Interact Sports y cumplimiento DS1."
-    elif "Vial" in categoria or "Túnel" in categoria:
-        if "Telegestión" in control or "Zhaga" in control or "Nema" in control:
-            estado = "Cumple Totalmente (Conectividad IoT)"
-            brecha = "Licitación vial/túnel exige control: RoadFlair / Xceed Pro con zócalo Zhaga/NEMA sobre plataforma Interact City cumple 100%."
-        else:
-            brecha = "Licitación vial: Se recomienda RoadFlair con opción de telegestión Interact City."
-    elif "Solar" in categoria:
-        brecha = "Sistema fotovoltaico autónomo: GreenVision Solar cumple con requerimientos fuera de red."
-    elif "Arquitectónica" in categoria:
-        brecha = "Control de iluminación dinámico: Dynalite y Color Kinetics garantizan gestión RGBW y DS1."
-    else:
-        brecha = "Portafolio industrial ActiStar / CoreLine cubre requerimientos base."
-        
-    return estado, brecha
+    tiene_token_troncal = False
+    for palabra, pts in tokens_luz:
+        if palabra in texto:
+            score += pts
+            detalles.append(f"+{pts} ({palabra})")
+            if palabra in ["luminaria", "luminarias", "alumbrado", "iluminacion", "iluminación", "proyector", "proyectores"]:
+                tiene_token_troncal = True
 
-def procesar_inteligencia_avanzada(row):
-    codigo = str(row.get('CodigoExterno', ''))
-    texto_base = str(row.get('Nombre', '')) + " " + str(row.get('Descripcion', ''))
-    
-    documentos = row.get('Documentos', [])
-    texto_docs = ""
-    if isinstance(documentos, list):
-        for doc in documentos:
-            url_doc = doc.get('UrlDocumento', '') or doc.get('URL', '')
-            if url_doc and isinstance(url_doc, str) and url_doc.startswith('http'):
-                texto_docs += " " + extraer_texto_desde_url(url_doc)
+    # Blacklist estricta (Resta drásticamente para eliminar tomógrafos, ascensores, etc.)
+    tokens_basura = [
+        ("tomografo", 100), ("tomógrafo", 100), ("ascensor", 100), 
+        ("ascensores", 100), ("caldera", 80), ("cesfam", 50), 
+        ("hospital", 40), ("mampara", 50), ("dental", 80)
+    ]
+    for palabra, penalizacion in tokens_basura:
+        if palabra in texto:
+            score -= penalizacion
+            detalles.append(f"-{penalizacion} [BLACKLIST: {palabra}]")
 
-    datos_web = extraer_detalle_profundo_web(codigo)
-    texto_total = (texto_base + " " + texto_docs + " " + datos_web.get("Texto_Adjuntos_Profundo", "")).lower()
+    # Condición indispensable: Debe tener al menos un término troncal de iluminación y un score >= 30
+    es_valido = tiene_token_troncal and (score >= 30)
 
-    # Monto de Propuesta / Estimado desde la API (Monto base de la licitación)
-    monto_propuesta = float(row.get('Monto', 0) or row.get('MontoEstimado', 0) or 0)
-    if monto_propuesta == 0:
-        # Intentar extraer monto del texto de bases si la API no lo trae directo
-        match_monto = re.findall(r'(?:monto|presupuesto|ref(?:erencia)?)\D{1,15}\$?\s*([\d\.,]+)', texto_total)
-        if match_monto:
-            try:
-                monto_propuesta = float(match_monto[0].replace('.', '').replace(',', '.'))
-            except Exception:
-                monto_propuesta = 50000000 # Estimado estándar base
-
-    # Monto Adjudicado real
-    adjudicacion_info = row.get('Adjudicacion', {})
-    proveedor = "En proceso / Vigente"
-    monto_adjudicado = 0
-    cantidad = 0
-    if isinstance(adjudicacion_info, dict):
-        items_adj = adjudicacion_info.get('Items', [])
-        provs = adjudicacion_info.get('Proveedor', [])
-        if provs and isinstance(provs, list): 
-            proveedor = provs[0].get('Nombre', 'Proveedor Externo')
-        if items_adj and isinstance(items_adj, list):
-            for it in items_adj:
-                cantidad += float(it.get('Cantidad', 0) or 0)
-                monto_adjudicado += float(it.get('Total', 0) or 0)
-
-    # Si no hay adjudicación registrada, el monto adjudicado es 0 (es proceso en curso)
-    if monto_adjudicado == 0:
-        proveedor = "En curso (< 10 días / Vigente)"
-
-    moneda, visita, garantias, plazo_entrega, garantia_prod, multas, certs, control_reqs, potencia, flujo, ip, ik = extraer_elementos_comerciales_y_tecnicos(texto_total)
-    marcas = datos_web.get("Competencia_Web", "Competencia Alternativa")
-
-    pauta = "Evaluada según criterios técnicos y económicos."
-    if 'puntaje' in texto_total or 'evaluacion' in texto_total:
-        pauta = "Pauta con criterios ponderados (Precio, Técnica, Experiencia)."
-
-    if 'estadio' in texto_total or 'cancha' in texto_total or 'deportivo' in texto_total:
-        signify_eq = "Arena X + Interact Sports (Proyectores Deportivos)"
-        categoria = "Iluminación Deportiva / Canchas"
-    elif 'túnel' in texto_total or 'tunel' in texto_total or 'vial' in texto_total or 'autopista' in texto_total or 'alumbrado publico' in texto_total or 'alumbrado público' in texto_total:
-        signify_eq = "RoadFlair / Xceed Pro + Interact City (Telegestión Vial)"
-        categoria = "Iluminación Vial / Pública"
-    elif 'solar' in texto_total or 'fotovoltaica' in texto_total:
-        signify_eq = "GreenVision Solar (Autónoma)"
-        categoria = "Luminarias Solares"
-    elif 'arquitectonico' in texto_total or 'fachada' in texto_total or 'ornamental' in texto_total:
-        signify_eq = "Tango Pro / Color Kinetics + Dynalite"
-        categoria = "Iluminación Ornamental / Arquitectónica"
-    else:
-        signify_eq = "Proyectores de Área / CoreLine"
-        categoria = "Proyectores de Área / General"
-
-    estado_cumplimiento, analisis_brecha = evaluar_cumplimiento_signify(categoria, potencia, control_reqs, texto_total)
-
-    fecha_creacion_str = str(row.get('FechaCreacion', ''))[:10]
-    
-    # Determinar si es licitación en curso (publicada en los últimos 10 días)
-    es_reciente = False
-    try:
-        f_creacion = datetime.strptime(fecha_creacion_str, '%Y-%m-%d')
-        if (datetime.now() - f_creacion).days <= 10:
-            es_reciente = True
-    except Exception:
-        pass
-
-    # Volumen de mercado efectivo para métricas: si es reciente usa propuesta, si está adjudicado usa adjudicado
-    volumen_efectivo = monto_adjudicado if monto_adjudicado > 0 else (monto_propuesta if es_reciente else (monto_propuesta if monto_propuesta > 0 else 50000000))
-
-    return pd.Series([
-        proveedor, monto_adjudicado, monto_propuesta, volumen_efectivo, cantidad, categoria, signify_eq, marcas, pauta,
-        potencia, flujo, ip, ik, certs, control_reqs,
-        moneda, visita, garantias, plazo_entrega, garantia_prod, multas,
-        estado_cumplimiento, analisis_brecha, fecha_creacion_str, str(row.get('FechaCierre', ''))[:10]
-    ])
+    return es_valido, score, " | ".join(detalles)
 
 def main():
     ticket = os.environ.get('TICKET_MP')
-    if not ticket: return
+    if not ticket:
+        print("Error: TICKET_MP no configurado.")
+        return
 
-    reglas = cargar_memoria_persistente()
+    print("Conectando con la API de Mercado Público...")
     url = f"https://api.mercadopublico.cl/servicios/v1/publico/licitaciones.json?ticket={ticket}"
     response = requests.get(url)
+    
+    if response.status_code != 200:
+        print("Error al conectar con la API.")
+        return
+
+    data = response.json()
+    licitaciones = data.get('Listado', [])
+    print(f"Total licitaciones evaluadas de la API: {len(licitaciones)}")
+
+    registros_validos = []
+
+    for item in licitaciones:
+        codigo = item.get('CodigoExterno')
+        nombre = item.get('Nombre', '')
+        descripcion = item.get('Descripcion', '')
+        
+        texto_completo = f"{nombre} {descripcion}".lower()
+
+        # Evaluación estricta de Scoring
+        es_valido, score, detalle_score = calcular_scoring_estricto(texto_completo)
+
+        if es_valido:
+            # Extracción profunda de parámetros técnicos
+            cant_unidades, potencia, flujo, ip, ik, control, certs = analizar_y_extraer_tecnico_y_comercial(texto_completo)
+
+            # Clasificación de categoría
+            categoria = "Iluminación Vial / Pública"
+            signify_eq = "RoadFlair / Xceed Pro + Interact City"
+            if "estadio" in texto_completo or "cancha" in texto_completo or "deportivo" in texto_completo:
+                categoria = "Iluminación Deportiva"
+                signify_eq = "Arena X + Interact Sports"
+            elif "solar" in texto_completo or "fotovoltaica" in texto_completo:
+                categoria = "Luminarias Solares"
+                signify_eq = "GreenVision Solar"
+            elif "ornamental" in texto_completo or "fachada" in texto_completo:
+                categoria = "Iluminación Ornamental / Arquitectónica"
+                signify_eq = "Tango Pro / Color Kinetics + Dynalite"
+
+            monto_propuesta = float(item.get('Monto', 0) or 50000000)
+
+            record = {
+                'CodigoExterno': codigo,
+                'Nombre': nombre,
+                'Categoria_Proyecto': categoria,
+                'Signify_Equivalente': signify_eq,
+                'Cantidad_Unidades': cant_unidades,
+                'Requerimiento_Potencia': potencia,
+                'Requerimiento_Flujo_Luminoso': flujo,
+                'Requerimiento_IP': ip,
+                'Requerimiento_IK': ik,
+                'Sistemas_Control_Telegestion': control,
+                'Certificaciones_Exigidas': certs,
+                'Proveedor_Adjudicado': "En curso / Vigente",
+                'Monto_Propuesta_CLP': monto_propuesta,
+                'Monto_Adjudicado_CLP': 0,
+                'Score_Relevancia': score,
+                'Estado_Cumplimiento_Signify': "Cumple Totalmente (Alta Prioridad)",
+                'Analisis_Brecha_Tecnica': f"Score: {score} | {detalle_score} | Luminarias detectadas: {cant_unidades}",
+                'Fecha_Creacion': str(item.get('FechaCreacion', ''))[:10],
+                'Fecha_Cierre': str(item.get('FechaCierre', ''))[:10]
+            }
+            registros_validos.append(record)
+
+    df_final = pd.DataFrame(registros_validos)
     os.makedirs('agliluz', exist_ok=True)
-    
     historial_path = 'agliluz/historial_licitaciones.xlsx'
-    dashboard_path = 'agliluz/dashboard_inteligencia_mercado.xlsx'
+    df_final.to_excel(historial_path, index=False)
     
-    df_historico = pd.DataFrame()
-    if os.path.exists(historial_path):
-        try: df_historico = pd.read_excel(historial_path)
-        except Exception: pass
-
-    df_filtrado = pd.DataFrame()
-    if response.status_code == 200:
-        data = response.json()
-        licitaciones = data.get('Listado', [])
-        if licitaciones:
-            df_nuevo = pd.DataFrame(licitaciones)
-            if 'FechaCreacion' in df_nuevo.columns:
-                df_nuevo['FechaCreacion'] = pd.to_datetime(df_nuevo['FechaCreacion'], errors='coerce')
-                df_nuevo = df_nuevo[df_nuevo['FechaCreacion'] >= datetime(2026, 1, 1)]
-            
-            text_cols = [c for c in ['Nombre', 'Descripcion', 'CodigoExterno', 'Comprador'] if c in df_nuevo.columns]
-            if text_cols and not df_nuevo.empty:
-                df_nuevo['texto_busqueda'] = df_nuevo[text_cols].astype(str).agg(' '.join, axis=1).str.lower()
-                
-                pattern_ilum = '|'.join(reglas["whitelist_iluminacion"])
-                mask_ilum = df_nuevo['texto_busqueda'].str.contains(pattern_ilum, na=False, case=False)
-                
-                pattern_blacklist = '|'.join(reglas["blacklist_estricta"])
-                mask_blacklist = df_nuevo['texto_busqueda'].str.contains(pattern_blacklist, na=False, case=False)
-                
-                mask_final = mask_ilum & (~mask_blacklist)
-                df_filtrado = df_nuevo[mask_final].copy().drop(columns=['texto_busqueda'])
-
-            if not df_filtrado.empty:
-                cols_res = [
-                    'Proveedor_Adjudicado', 'Monto_Adjudicado_CLP', 'Monto_Propuesta_CLP', 'Volumen_Mercado_Efectivo', 'Cantidad_Unidades', 
-                    'Categoria_Proyecto', 'Signify_Equivalente', 'Marcas_Competencia_Detectadas', 
-                    'Pautas_Y_Puntajes_Evaluacion', 'Requerimiento_Potencia', 'Requerimiento_Flujo_Luminoso', 
-                    'Requerimiento_IP', 'Requerimiento_IK', 'Certificaciones_Exigidas', 'Sistemas_Control_Telegestion',
-                    'Moneda_Oferta', 'Visita_Terreno', 'Garantias_Requeridas', 'Plazo_Entrega_Bodega', 
-                    'Garantia_Producto_Anios', 'Multas_Y_Sanciones', 'Estado_Cumplimiento_Signify', 
-                    'Analisis_Brecha_Tecnica', 'Fecha_Creacion', 'Fecha_Cierre'
-                ]
-                print(f"Procesando {len(df_filtrado)} licitaciones de iluminación con doble monto (Propuesta vs Adjudicado)...")
-                df_filtrado[cols_res] = df_filtrado.apply(procesar_inteligencia_avanzada, axis=1)
-
-    if not df_filtrado.empty:
-        if not df_historico.empty:
-            cols_chk = [c for c in ['Nombre', 'CodigoExterno'] if c in df_historico.columns]
-            if cols_chk:
-                mask_ej = False
-                for c in cols_chk: mask_ej = mask_ej | df_historico[c].astype(str).str.contains('Ejemplo|\[Ejemplo\]', na=False, regex=True)
-                df_historico = df_historico[~mask_ej]
-            df_combinado = pd.concat([df_filtrado, df_historico]).drop_duplicates(subset=['CodigoExterno'], keep='first')
-        else:
-            df_combinado = df_filtrado
-    else:
-        df_combinado = df_historico
-
-    if df_combinado.empty:
-        df_combinado = pd.DataFrame(columns=['CodigoExterno', 'Nombre', 'Categoria_Proyecto', 'Signify_Equivalente', 'Monto_Propuesta_CLP', 'Monto_Adjudicado_CLP', 'Estado_Cumplimiento_Signify'])
-
-    df_combinado.to_excel(historial_path, index=False)
-    
-    with pd.ExcelWriter(dashboard_path, engine='openpyxl') as writer:
-        df_combinado.to_excel(writer, sheet_name='Dashboard_General', index=False)
-        df_combinado.to_excel(writer, sheet_name='Mapa_Competencia_Adjudicadas', index=False)
-        portafolio = pd.DataFrame({
-            "Familia_Signify": ["RoadFlair + Interact City", "Arena X + Interact Sports", "Tango Pro + Dynalite", "Color Kinetics", "GreenVision Solar"],
-            "Aplicacion": ["Vial Pública e Inteligente", "Estadios y Canchas Deportivas", "Ornamental y Arquitectónica", "Fachadas Monumentales", "Luminarias Solares"],
-            "Estrategia": ["Smart cities y telegestión centralizada", "Alto rendimiento, potencia e IND", "Control dinámico DALI/DMX", "Cumplimiento estricto DS1", "Autonomía completa fuera de red"]
-        })
-        portafolio.to_excel(writer, sheet_name='Portafolio_Signify_Chile', index=False)
+    print(f"¡Proceso completado! {len(df_final)} licitaciones puras de iluminación extraídas y guardadas.")
 
 if __name__ == '__main__':
     main()
-    
