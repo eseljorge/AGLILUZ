@@ -5,3 +5,4 @@ openpyxl
 streamlit
 playwright
 beautifulsoup4
+PyYAML
